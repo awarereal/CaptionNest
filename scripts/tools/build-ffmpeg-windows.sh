@@ -24,7 +24,7 @@ CONFIGURE_ARGS=(
   --enable-static --disable-shared
   --disable-gpl --disable-nonfree
   --disable-autodetect
-  --enable-w32threads --enable-mediafoundation --enable-zlib
+  --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-zlib
   --disable-network
   --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages
   --disable-ffplay
