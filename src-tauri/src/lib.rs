@@ -449,7 +449,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(move |app| {
-            let paths = Paths::resolve(app.handle())?;
+            let paths = Paths::resolve(app.handle()).inspect_err(|e| {
+                eprintln!("CaptionNest could not start: {} ({})", e.message, e.detail.as_deref().unwrap_or(""));
+                log::error!("setup failed: {e:?}");
+            })?;
             jobs::sweep_abandoned(&paths.jobs);
             #[cfg(feature = "automation")]
             automation::start(app.handle());

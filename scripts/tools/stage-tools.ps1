@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path "$PSScriptRoot/../..").Path
 $Env = @{}
-Get-Content "$Root/scripts/tools/versions.env" | Where-Object { $_ -match "^[A-Z_]+=" } | ForEach-Object {
+Get-Content "$Root/scripts/tools/versions.env" | Where-Object { $_ -match "^[A-Z0-9_]+=" } | ForEach-Object {
   $k, $v = $_ -split "=", 2; $Env[$k] = $v.Trim()
 }
 $SrcDir = "$Root/build/tools/x86_64-pc-windows-msvc"

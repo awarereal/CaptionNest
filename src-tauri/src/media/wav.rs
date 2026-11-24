@@ -19,6 +19,7 @@ impl WavInfo {
         self.sample_rate as f64 * self.channels as f64 * (self.bits as f64 / 8.0) / 1000.0
     }
 
+    #[cfg(test)]
     pub fn duration_ms(&self) -> i64 {
         (self.data_len as f64 / self.bytes_per_ms()) as i64
     }

@@ -103,7 +103,7 @@ pub async fn transcribe_spans(
             if out.language.is_none() {
                 out.language = t.language;
             }
-            out.words.extend(t.words.into_iter().map(|w| Word { start_ms: w.start_ms + s, end_ms: w.end_ms + s, text: w.text }));
+            out.words.extend(t.words.into_iter().map(|w| Word { start_ms: w.start_ms + s, end_ms: w.end_ms + s, ..w }));
             let _ = std::fs::remove_file(&json);
             let _ = std::fs::remove_file(work_dir.join(name));
         }
@@ -129,7 +129,7 @@ async fn run_batch(
     // Short relative file names keep the command line small.
     cmd.current_dir(work_dir);
     cmd.arg("-m").arg(&opts.model)
-        .args(["-oj", "-pp", "-sns"])
+        .args(["-ojf", "-pp", "-sns"])
         .args(["-t", &opts.threads.to_string()])
         .args(["-l", opts.language.as_deref().unwrap_or("auto")]);
     if opts.word_timestamps {
@@ -270,6 +270,30 @@ struct RawResult {
 struct RawSegment {
     offsets: RawOffsets,
     text: String,
+    #[serde(default)]
+    tokens: Vec<RawToken>,
+}
+
+#[derive(Deserialize)]
+struct RawToken {
+    #[serde(default)]
+    text: String,
+    #[serde(default = "one")]
+    p: f32,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// Lowest probability among the tokens that carry letters (special tokens such as
+/// "[_BEG_]", spaces and punctuation don't count).
+fn word_confidence(tokens: &[RawToken]) -> f32 {
+    tokens
+        .iter()
+        .filter(|t| !t.text.starts_with("[_") && t.text.chars().any(|c| c.is_alphanumeric() || c == '\u{FFFD}' || ('\u{0980}'..='\u{09FF}').contains(&c)))
+        .map(|t| t.p)
+        .fold(1.0_f32, f32::min)
 }
 
 #[derive(Deserialize)]
@@ -297,7 +321,7 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
             if cleaned.trim().is_empty() {
                 return None;
             }
-            Some(Word { start_ms: s.offsets.from.max(0), end_ms: s.offsets.to.max(s.offsets.from), text: cleaned })
+            Some(Word { confidence: word_confidence(&s.tokens), start_ms: s.offsets.from.max(0), end_ms: s.offsets.to.max(s.offsets.from), text: cleaned })
         })
         .collect();
     Ok(Transcript {
@@ -350,6 +374,17 @@ mod tests {
     fn fixed_windows_cover_the_range() {
         assert_eq!(fixed_windows(0, 25_000, 12_000), vec![(0, 12_000), (12_000, 24_000), (24_000, 25_000)]);
         assert!(fixed_windows(5, 5, 1_000).is_empty());
+    }
+
+    #[test]
+    fn reads_word_confidence_from_tokens() {
+        let json = r#"{"transcription":[
+          {"offsets":{"from":0,"to":500},"text":" বলি।","tokens":[
+            {"text":"[_BEG_]","p":0.2},{"text":" ","p":0.99},{"text":"ব","p":0.66},{"text":"ল","p":0.83},{"text":"।","p":0.39}]},
+          {"offsets":{"from":500,"to":900},"text":" নাম","tokens":[{"text":"ন","p":0.99},{"text":"ম","p":0.97}]}]}"#;
+        let t = parse_json(json.as_bytes()).unwrap();
+        assert!((t.words[0].confidence - 0.66).abs() < 1e-6, "punctuation and special tokens ignored");
+        assert!((t.words[1].confidence - 0.97).abs() < 1e-6);
     }
 
     #[test]

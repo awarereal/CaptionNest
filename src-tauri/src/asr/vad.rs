@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn drops_words_outside_speech() {
-        let w = |s, e, t: &str| Word { start_ms: s, end_ms: e, text: t.into() };
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: t.into() };
         let words = vec![w(100, 400, " hello"), w(5_000, 5_600, " invented"), w(9_000, 9_300, " world")];
         let kept = keep_speech(words, &[(0, 1_000), (8_800, 9_500)], 300);
         let texts: Vec<_> = kept.iter().map(|w| w.text.as_str()).collect();
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn finds_speech_without_words() {
-        let w = |s, e| Word { start_ms: s, end_ms: e, text: " x".into() };
+        let w = |s, e| Word { confidence: 1.0, start_ms: s, end_ms: e, text: " x".into() };
         let words = vec![w(1_000, 1_500), w(1_600, 2_000), w(9_000, 9_400)];
         let gaps = uncovered(&[(900, 6_000), (8_800, 9_500)], &words, 200, 1_500);
         assert_eq!(gaps, vec![(2_200, 6_000)]);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn no_segments_means_no_filtering() {
-        let words = vec![Word { start_ms: 0, end_ms: 10, text: " a".into() }];
+        let words = vec![Word { confidence: 1.0, start_ms: 0, end_ms: 10, text: " a".into() }];
         assert_eq!(keep_speech(words.clone(), &[], 0), words);
     }
 }

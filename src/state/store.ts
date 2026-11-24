@@ -31,6 +31,8 @@ export interface JobView {
   progress: number | null;
   detail?: string;
   startedAt: number;
+  /** When the current stage began (for time-left estimates). */
+  stageStartedAt: number;
   stages: Stage[];
   targetLanguage?: string;
 }
@@ -261,7 +263,7 @@ export const useStore = create<Store>((set, get) => {
       const stages: Stage[] = ["extracting", "transcribing"];
       if (caption !== "same" && caption !== settings.spokenLanguage) stages.push("translating");
       set({
-        job: { id: null, kind: "generate", stage: "preparing", progress: null, startedAt: Date.now(), stages },
+        job: { id: null, kind: "generate", stage: "preparing", progress: null, startedAt: Date.now(), stageStartedAt: Date.now(), stages },
         jobError: null,
         warnings: [],
       });
@@ -295,6 +297,7 @@ export const useStore = create<Store>((set, get) => {
           stage: "preparing",
           progress: null,
           startedAt: Date.now(),
+          stageStartedAt: Date.now(),
           stages: ["translating"],
           targetLanguage: target,
         },
@@ -336,7 +339,8 @@ export const useStore = create<Store>((set, get) => {
       const job = get().job;
       if (!job || (job.id && job.id !== e.jobId)) return;
       const stages = job.stages.includes(e.stage) || e.stage === "preparing" || e.stage === "finishing" ? job.stages : [...job.stages, e.stage];
-      set({ job: { ...job, id: e.jobId, stage: e.stage, progress: e.progress, detail: e.detail, stages } });
+      const stageStartedAt = e.stage !== job.stage ? Date.now() : job.stageStartedAt;
+      set({ job: { ...job, id: e.jobId, stage: e.stage, progress: e.progress, detail: e.detail, stages, stageStartedAt } });
     },
 
     onJobFinished(e) {

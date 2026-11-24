@@ -30,10 +30,14 @@ impl SelfTest {
         let args: Vec<String> = std::env::args().collect();
         let i = args.iter().position(|a| a == "--self-test")?;
         let get = |flag: &str| args.iter().position(|a| a == flag).and_then(|j| args.get(j + 1)).cloned();
+        let abs = |p: String| -> PathBuf {
+            let p = PathBuf::from(p);
+            std::fs::canonicalize(&p).unwrap_or_else(|_| std::env::current_dir().map(|d| d.join(&p)).unwrap_or(p))
+        };
         Some(Self {
-            video: PathBuf::from(args.get(i + 1)?),
-            model: PathBuf::from(get("--model")?),
-            out: PathBuf::from(get("--out")?),
+            video: abs(args.get(i + 1)?.clone()),
+            model: abs(get("--model")?),
+            out: abs(get("--out")?),
             language: get("--language").unwrap_or_else(|| "auto".into()),
         })
     }

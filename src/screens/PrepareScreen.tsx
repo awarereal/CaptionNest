@@ -380,6 +380,20 @@ function Elapsed({ since }: { since: number }) {
   );
 }
 
+/** Estimate from this stage's own pace; shown once there's enough to go on. */
+function TimeLeft({ since, progress }: { since: number; progress: number | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 2000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = (Date.now() - since) / 1000;
+  if (progress === null || progress < 0.04 || progress >= 1 || elapsed < 8) return null;
+  const left = (elapsed * (1 - progress)) / progress;
+  const text = left < 50 ? "Less than a minute left" : left < 90 ? "About a minute left" : `About ${Math.round(left / 60)} min left`;
+  return <span className="stage__eta">{text}</span>;
+}
+
 export function JobProgress({ compact = false }: { compact?: boolean }) {
   const job = useStore((s) => s.job)!;
   const settings = useStore((s) => s.settings);
@@ -417,10 +431,13 @@ export function JobProgress({ compact = false }: { compact?: boolean }) {
                   <span className="visually-hidden">{state === "done" ? " — done" : state === "active" ? " — in progress" : " — waiting"}</span>
                 </span>
                 {state === "active" && (
-                  <div className="stage__progress">
-                    <ProgressBar value={job.progress} label={label(s)} />
-                    <span className="mono stage__pct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : ""}</span>
-                  </div>
+                  <>
+                    <div className="stage__progress">
+                      <ProgressBar value={job.progress} label={label(s)} />
+                      <span className="mono stage__pct">{job.progress !== null ? `${Math.round(job.progress * 100)}%` : ""}</span>
+                    </div>
+                    <TimeLeft since={job.stageStartedAt} progress={job.progress} />
+                  </>
                 )}
               </div>
             </li>

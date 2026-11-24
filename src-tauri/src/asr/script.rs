@@ -18,6 +18,16 @@ pub fn devanagari_to_bengali(text: &str) -> String {
     text.chars()
         .map(|c| {
             let cp = c as u32;
+            // Whisper sometimes emits code points that are unassigned in the Bengali block
+            // (Devanagari letters shifted into it). They render as empty boxes, so map them
+            // to the letter Bengali uses for that sound.
+            match cp {
+                0x09B5 => return '\u{09AC}', // "va" -> ব
+                0x09B1 => return '\u{09B0}', // "rra" -> র
+                0x09B4 => return '\u{09B2}', // "llla" -> ল
+                0x09B3 => return '\u{09B2}', // "lla" -> ল
+                _ => {}
+            }
             if !(0x0900..=0x097F).contains(&cp) || cp == 0x0964 || cp == 0x0965 {
                 return c;
             }
@@ -57,6 +67,13 @@ mod tests {
         assert_eq!(devanagari_to_bengali("আমি বাংলায় কথা বলি।"), "আমি বাংলায় কথা বলি।");
         assert_eq!(devanagari_to_bengali("Hello, 2024!"), "Hello, 2024!");
         assert_eq!(devanagari_to_bengali("वन"), "বন");
+    }
+
+    #[test]
+    fn replaces_unassigned_bengali_code_points() {
+        // Real Whisper output: "঵েবসাইটে" with U+09B5, which fonts can't draw.
+        assert_eq!(devanagari_to_bengali("\u{09B5}েবসাইটে"), "বেবসাইটে");
+        assert!(devanagari_to_bengali("\u{09B1}\u{09B4}").chars().all(is_assigned_bengali));
     }
 
     #[test]

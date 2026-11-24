@@ -13,4 +13,6 @@ pub struct Word {
     pub end_ms: i64,
     /// Text including its leading space as produced by Whisper (" word").
     pub text: String,
+    /// Whisper's confidence in this word (lowest letter probability, 0..1).
+    pub confidence: f32,
 }

@@ -124,7 +124,7 @@ mod tests {
     use super::*;
 
     fn cue(id: &str, s: i64, e: i64, t: &str) -> Cue {
-        Cue { id: id.into(), start_ms: s, end_ms: e, text: t.into() }
+        Cue { check: Vec::new(), id: id.into(), start_ms: s, end_ms: e, text: t.into() }
     }
 
     #[test]

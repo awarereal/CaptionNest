@@ -115,9 +115,17 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         if let Some(m) = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m)) {
             detect_opts.model = models::whisper_path(paths, m);
         }
-        if let Some((lang, p)) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, first_speech, cancel).await? {
-            if p < 0.5 {
-                uncertain = Some(format!("language_uncertain:{lang}:{p:.2}"));
+        // Listen at up to three places (start, middle, later) and vote, so a music
+        // intro or a short greeting in another language can't decide on its own.
+        let mut votes = Vec::new();
+        for at in detection_points(&speech, first_speech) {
+            if let Some(v) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, at, cancel).await? {
+                votes.push(v);
+            }
+        }
+        if let Some((lang, confidence)) = vote_language(&votes) {
+            if confidence < 0.5 {
+                uncertain = Some(format!("language_uncertain:{lang}:{confidence:.2}"));
             }
             opts.language = Some(lang);
         }
@@ -253,6 +261,34 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
     }
     let missed = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
     Ok((t, missed))
+}
+
+/// Start times (ms) of up to three speech regions spread across the video.
+fn detection_points(speech: &[(i64, i64)], first: i64) -> Vec<i64> {
+    if speech.len() < 3 {
+        return vec![first];
+    }
+    let mut pts: Vec<i64> = [0, speech.len() / 2, speech.len() * 3 / 4]
+        .iter()
+        .map(|&i| (speech[i].0 - 300).max(0))
+        .collect();
+    pts.dedup();
+    pts
+}
+
+/// Combines detections: the language with the highest total probability wins.
+/// Confidence is that total divided by the number of listens, so disagreement between
+/// listens lowers it as much as a hesitant single listen does.
+fn vote_language(votes: &[(String, f32)]) -> Option<(String, f32)> {
+    let mut totals: Vec<(String, f32)> = Vec::new();
+    for (lang, p) in votes {
+        match totals.iter_mut().find(|(l, _)| l == lang) {
+            Some(t) => t.1 += p,
+            None => totals.push((lang.clone(), *p)),
+        }
+    }
+    let (lang, total) = totals.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    Some((lang, total / votes.len() as f32))
 }
 
 /// Finds speech with the bundled VAD. A file with no speech at all stops here with a
@@ -393,6 +429,7 @@ async fn argos_translate(ctx: &Ctx<'_>, base: &Track, target: &str, packages: &[
         .iter()
         .zip(texts)
         .map(|(c, text)| Cue {
+            check: Vec::new(),
             id: uuid::Uuid::new_v4().to_string(),
             start_ms: c.start_ms,
             end_ms: c.end_ms,
@@ -487,4 +524,27 @@ fn preflight_translation(paths: &Paths, spoken: Option<&str>, target: &str, tran
 /// Used by `probe_media` and before generation.
 pub async fn probe(paths: &Paths, path: &Path) -> AppResult<probe::MediaInfo> {
     probe::probe(&paths.tool("ffprobe")?, path).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detection_listens_across_the_video() {
+        let speech: Vec<(i64, i64)> = (0..10).map(|i| (i * 10_000 + 500, i * 10_000 + 4_000)).collect();
+        assert_eq!(detection_points(&speech, 200), vec![200, 50_200, 70_200]);
+        assert_eq!(detection_points(&speech[..2], 200), vec![200]);
+    }
+
+    #[test]
+    fn majority_language_wins_and_disagreement_lowers_confidence() {
+        let v = |l: &str, p: f32| (l.to_string(), p);
+        let (l, c) = vote_language(&[v("en", 0.6), v("bn", 0.95), v("bn", 0.9)]).unwrap();
+        assert_eq!(l, "bn");
+        assert!((c - 0.6167).abs() < 0.01);
+        let (l, c) = vote_language(&[v("bn", 0.97)]).unwrap();
+        assert_eq!((l.as_str(), c > 0.9), ("bn", true));
+        assert!(vote_language(&[]).is_none());
+    }
 }

@@ -72,7 +72,7 @@ mod tests {
     use crate::asr::Word;
 
     fn w(t: &str) -> Word {
-        Word { start_ms: 0, end_ms: 1, text: format!(" {t}") }
+        Word { confidence: 1.0, start_ms: 0, end_ms: 1, text: format!(" {t}") }
     }
 
     #[test]

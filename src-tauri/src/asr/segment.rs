@@ -65,11 +65,27 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
         .iter()
         .map(|g| {
             let text = wrap_text(&join(g), opts.max_line_chars);
-            Cue::new(g[0].start_ms, g[g.len() - 1].end_ms, text)
+            let mut cue = Cue::new(g[0].start_ms, g[g.len() - 1].end_ms, text);
+            cue.check = uncertain_words(g);
+            cue
         })
         .collect();
     fix_timing(&mut cues, opts, media_end_ms);
     cues
+}
+
+/// Below this confidence a word is listed for the user to check.
+pub const CHECK_BELOW: f32 = 0.5;
+
+fn uncertain_words(words: &[&Word]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in words.iter().filter(|w| w.confidence < CHECK_BELOW) {
+        let t: String = w.text.trim().trim_matches(|c: char| !c.is_alphanumeric() && !('\u{0980}'..='\u{09FF}').contains(&c)).to_string();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// Applies minimum duration and linger without creating overlaps.
@@ -101,6 +117,7 @@ fn clean(words: &[Word]) -> Vec<Word> {
             }
             // Punctuation that arrived as its own token belongs to the previous word.
             if t.chars().all(|c| SENTENCE_END.contains(&c) || CLAUSE_END.contains(&c)) {
+                prev.confidence = prev.confidence.min(w.confidence.max(CHECK_BELOW));
                 prev.text.push_str(t);
                 prev.end_ms = prev.end_ms.max(w.end_ms);
                 continue;
@@ -279,17 +296,17 @@ mod tests {
     use super::*;
 
     fn words(spec: &[(i64, i64, &str)]) -> Vec<Word> {
-        spec.iter().map(|(s, e, t)| Word { start_ms: *s, end_ms: *e, text: format!(" {t}") }).collect()
+        spec.iter().map(|(s, e, t)| Word { confidence: 1.0, start_ms: *s, end_ms: *e, text: format!(" {t}") }).collect()
     }
 
     /// `n` copies of the same word.
     fn sentence(start: i64, n: usize, word: &str, step: i64) -> Vec<Word> {
-        (0..n).map(|i| Word { start_ms: start + i as i64 * step, end_ms: start + (i as i64 + 1) * step - 20, text: format!(" {word}") }).collect()
+        (0..n).map(|i| Word { confidence: 1.0, start_ms: start + i as i64 * step, end_ms: start + (i as i64 + 1) * step - 20, text: format!(" {word}") }).collect()
     }
 
     /// `n` different words ("word0", "word1", ...).
     fn varied(start: i64, n: usize, step: i64) -> Vec<Word> {
-        (0..n).map(|i| Word { start_ms: start + i as i64 * step, end_ms: start + (i as i64 + 1) * step - 20, text: format!(" word{i}") }).collect()
+        (0..n).map(|i| Word { confidence: 1.0, start_ms: start + i as i64 * step, end_ms: start + (i as i64 + 1) * step - 20, text: format!(" word{i}") }).collect()
     }
 
     #[test]
@@ -347,7 +364,7 @@ mod tests {
     fn drops_noise_markers_and_loops() {
         let mut w = words(&[(0, 500, "[BLANK_AUDIO]"), (500, 900, "(music)"), (900, 1000, "♪"), (1000, 1400, "Real"), (1400, 1800, "words")]);
         for _ in 0..10 {
-            w.push(Word { start_ms: 1800, end_ms: 1800, text: " words".into() });
+            w.push(Word { confidence: 1.0, start_ms: 1800, end_ms: 1800, text: " words".into() });
         }
         let cues = segment(&w, &Options::default(), None);
         assert_eq!(cues.len(), 1);
@@ -381,7 +398,7 @@ mod tests {
 
     #[test]
     fn drops_instant_duplicate_runs_from_vad() {
-        let w = |s, e, t: &str| Word { start_ms: s, end_ms: e, text: format!(" {t}") };
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: format!(" {t}") };
         // Real whisper.cpp output shape: three words sharing 6650-6750, then the real words.
         let words = vec![
             w(6250, 6650, "হয়।"),
@@ -396,6 +413,7 @@ mod tests {
     #[test]
     fn translation_segments_split_into_readable_cues() {
         let seg = Word {
+            confidence: 1.0,
             start_ms: 0,
             end_ms: 10_000,
             text: " It was supposed to be cut down on Tuesday, but it was saved after an emergency court ruling. The results will be posted online.".into(),
@@ -413,16 +431,24 @@ mod tests {
 
     #[test]
     fn repeated_translation_segments_collapse() {
-        let seg = |s, e| Word { start_ms: s, end_ms: e, text: " The first thing is to focus on public websites.".into() };
+        let seg = |s, e| Word { confidence: 1.0, start_ms: s, end_ms: e, text: " The first thing is to focus on public websites.".into() };
         let cues = from_segments(&[seg(12_000, 13_000), seg(13_000, 14_000), seg(14_000, 15_000)], &Options::default(), None);
         assert_eq!(cues.len(), 1, "{cues:?}");
         assert_eq!((cues[0].start_ms, cues[0].end_ms >= 15_000), (12_000, true));
     }
 
     #[test]
+    fn low_confidence_words_are_listed_for_checking() {
+        let mut w = words(&[(0, 300, "আমি"), (300, 700, "বাংলাজ"), (700, 1100, "কথা।")]);
+        w[1].confidence = 0.31;
+        let cues = segment(&w, &Options::default(), None);
+        assert_eq!(cues[0].check, vec!["বাংলাজ".to_string()]);
+    }
+
+    #[test]
     fn attaches_standalone_punctuation() {
         let mut w = words(&[(0, 400, "Hello")]);
-        w.push(Word { start_ms: 400, end_ms: 450, text: "?".into() });
+        w.push(Word { confidence: 1.0, start_ms: 400, end_ms: 450, text: "?".into() });
         let cues = segment(&w, &Options::default(), None);
         assert_eq!(cues[0].text, "Hello?");
     }

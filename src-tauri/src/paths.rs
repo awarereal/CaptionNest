@@ -29,16 +29,33 @@ pub struct Paths {
 
 impl Paths {
     pub fn resolve(app: &AppHandle) -> AppResult<Self> {
-        let resources = app.path().resource_dir()?;
+        let ctx = |what: &str| {
+            let what = what.to_string();
+            move |e: tauri::Error| AppError::internal(format!("{what}: {e}"))
+        };
+        // The bundled resources; fall back to the executable's folder layouts if the
+        // platform lookup fails (e.g. an unusual install location).
+        let resources = match app.path().resource_dir() {
+            Ok(r) if r.join("tools").is_dir() => r,
+            other => {
+                let exe = std::env::current_exe().map_err(|e| AppError::internal(format!("current_exe: {e}")))?;
+                let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+                let candidates = [dir.join("../Resources"), dir.clone()];
+                match candidates.into_iter().find(|c| c.join("tools").is_dir()) {
+                    Some(c) => c,
+                    None => other.map_err(ctx("resource_dir"))?,
+                }
+            }
+        };
         let (data, config, cache) = match std::env::var_os("CAPTIONNEST_HOME") {
             Some(home) => {
                 let home = PathBuf::from(home);
                 (home.join("data"), home.join("config"), home.join("cache"))
             }
             None => (
-                app.path().app_local_data_dir()?,
-                app.path().app_config_dir()?,
-                app.path().app_cache_dir()?,
+                app.path().app_local_data_dir().map_err(ctx("app_local_data_dir"))?,
+                app.path().app_config_dir().map_err(ctx("app_config_dir"))?,
+                app.path().app_cache_dir().map_err(ctx("app_cache_dir"))?,
             ),
         };
         let paths = Self {
@@ -50,7 +67,7 @@ impl Paths {
             previews: cache.join("previews"),
         };
         for dir in [&paths.models, &paths.config, &paths.jobs, &paths.previews] {
-            std::fs::create_dir_all(dir)?;
+            std::fs::create_dir_all(dir).map_err(|e| AppError::internal(format!("create {}: {e}", dir.display())))?;
         }
         Ok(paths)
     }

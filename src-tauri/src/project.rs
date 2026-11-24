@@ -231,7 +231,7 @@ mod tests {
                 language: "bn".into(),
                 engine: "whisper".into(),
                 source_track_id: None,
-                cues: vec![Cue { id: "c1".into(), start_ms: 0, end_ms: 900, text: "আমি বাংলায় কথা বলি।\nদ্বিতীয় লাইন".into() }],
+                cues: vec![Cue { check: Vec::new(), id: "c1".into(), start_ms: 0, end_ms: 900, text: "আমি বাংলায় কথা বলি।\nদ্বিতীয় লাইন".into() }],
             }],
             active_track_id: Some("t1".into()),
         }
