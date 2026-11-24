@@ -1,0 +1,241 @@
+{
+	"systeminfo": "WHISPER : VITISAI = 0 | COREML = 0 | OPENVINO = 0 | MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | DOTPROD = 1 | ACCELERATE = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "large",
+		"multilingual": true,
+		"vocab": 51866,
+		"audio": {
+			"ctx": 1500,
+			"state": 1280,
+			"head": 20,
+			"layer": 32
+		},
+		"text": {
+			"ctx": 448,
+			"state": 1280,
+			"head": 20,
+			"layer": 4
+		},
+		"mels": 128,
+		"ftype": 8
+	},
+	"params": {
+		"model": "build/models/ggml-large-v3-turbo-q5_0.bin",
+		"language": "bn",
+		"translate": false
+	},
+	"result": {
+		"language": "bn"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,360"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 360
+			},
+			"text": " আমার"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,360",
+				"to": "00:00:00,630"
+			},
+			"offsets": {
+				"from": 360,
+				"to": 630
+			},
+			"text": " নাম"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,630",
+				"to": "00:00:00,990"
+			},
+			"offsets": {
+				"from": 630,
+				"to": 990
+			},
+			"text": " পিজা"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,990",
+				"to": "00:00:01,260"
+			},
+			"offsets": {
+				"from": 990,
+				"to": 1260
+			},
+			"text": " আমি"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,260",
+				"to": "00:00:01,710"
+			},
+			"offsets": {
+				"from": 1260,
+				"to": 1710
+			},
+			"text": " বালাজ"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,710",
+				"to": "00:00:01,980"
+			},
+			"offsets": {
+				"from": 1710,
+				"to": 1980
+			},
+			"text": " কথা"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:01,980",
+				"to": "00:00:02,250"
+			},
+			"offsets": {
+				"from": 1980,
+				"to": 2250
+			},
+			"text": " বলি"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,250",
+				"to": "00:00:02,430"
+			},
+			"offsets": {
+				"from": 2250,
+				"to": 2430
+			},
+			"text": " আজ"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,430",
+				"to": "00:00:02,790"
+			},
+			"offsets": {
+				"from": 2430,
+				"to": 2790
+			},
+			"text": " আভাও"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,790",
+				"to": "00:00:02,970"
+			},
+			"offsets": {
+				"from": 2790,
+				"to": 2970
+			},
+			"text": " জা"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:02,970",
+				"to": "00:00:03,240"
+			},
+			"offsets": {
+				"from": 2970,
+				"to": 3240
+			},
+			"text": " খুপ"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,240",
+				"to": "00:00:03,780"
+			},
+			"offsets": {
+				"from": 3240,
+				"to": 3780
+			},
+			"text": " শুন্দর"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:03,780",
+				"to": "00:00:04,140"
+			},
+			"offsets": {
+				"from": 3780,
+				"to": 4140
+			},
+			"text": " তায়"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,140",
+				"to": "00:00:04,590"
+			},
+			"offsets": {
+				"from": 4140,
+				"to": 4590
+			},
+			"text": " আম্রা"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,590",
+				"to": "00:00:05,040"
+			},
+			"offsets": {
+				"from": 4590,
+				"to": 5040
+			},
+			"text": " নোদির"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,040",
+				"to": "00:00:05,400"
+			},
+			"offsets": {
+				"from": 5040,
+				"to": 5400
+			},
+			"text": " ধারে"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,400",
+				"to": "00:00:05,760"
+			},
+			"offsets": {
+				"from": 5400,
+				"to": 5760
+			},
+			"text": " বেরা"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:05,760",
+				"to": "00:00:06,030"
+			},
+			"offsets": {
+				"from": 5760,
+				"to": 6030
+			},
+			"text": " আতে"
+		},
+		{
+			"timestamps": {
+				"from": "00:00:06,030",
+				"to": "00:00:07,260"
+			},
+			"offsets": {
+				"from": 6030,
+				"to": 7260
+			},
+			"text": " জাবো।"
+		}
+	]
+}

@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# CaptionNest build outputs
+/build/
+/src-tauri/resources/tools/
+/src-tauri/resources/bundled-models/
+/src-tauri/resources/licenses/FFMPEG_BUILD.txt
+/release/
