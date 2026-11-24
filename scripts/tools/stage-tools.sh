@@ -13,14 +13,14 @@ source "$ROOT/scripts/tools/versions.env"
 SRC="$ROOT/build/tools/$TRIPLE"
 RES="$ROOT/src-tauri/resources"
 
-for f in ffmpeg ffprobe whisper-cli; do
+for f in ffmpeg ffprobe whisper-cli whisper-vad; do
   [[ -x "$SRC/$f" ]] || { echo "missing $SRC/$f - build the tools first" >&2; exit 1; }
 done
 "$ROOT/scripts/tools/fetch-sources.sh" >/dev/null
 
 rm -rf "$RES/tools" "$RES/bundled-models"
 mkdir -p "$RES/tools" "$RES/bundled-models" "$RES/licenses"
-cp "$SRC/ffmpeg" "$SRC/ffprobe" "$SRC/whisper-cli" "$RES/tools/"
+cp "$SRC/ffmpeg" "$SRC/ffprobe" "$SRC/whisper-cli" "$SRC/whisper-vad" "$RES/tools/"
 cp "$ROOT/build/src/$VAD_MODEL_NAME" "$RES/bundled-models/"
 cp "$SRC/FFMPEG_CONFIGURE.txt" "$RES/licenses/FFMPEG_BUILD.txt"
 

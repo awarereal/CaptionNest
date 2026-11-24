@@ -87,8 +87,9 @@ fn fix_timing(cues: &mut [Cue], opts: &Options, media_end_ms: Option<i64>) {
 
 /// Removes non-speech markers and runaway repetition, merges punctuation-only tokens.
 fn clean(words: &[Word]) -> Vec<Word> {
+    let words = drop_instant_duplicates(words);
     let mut out: Vec<Word> = Vec::with_capacity(words.len());
-    for w in words {
+    for w in &words {
         let t = w.text.trim();
         if t.is_empty() || is_noise(t) {
             continue;
@@ -117,6 +118,95 @@ fn clean(words: &[Word]) -> Vec<Word> {
         result.push(w);
     }
     result
+}
+
+/// Whisper sometimes emits a run of words that all share one tiny time span, followed by
+/// the same words again with real timing (seen with VAD and at window boundaries).
+/// Such a run is dropped when the words right after it start at the same moment.
+fn drop_instant_duplicates(words: &[Word]) -> Vec<Word> {
+    let mut out = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let (s, e) = (words[i].start_ms, words[i].end_ms);
+        let mut j = i;
+        while j + 1 < words.len() && words[j + 1].start_ms == s && words[j + 1].end_ms == e {
+            j += 1;
+        }
+        let tiny = e - s <= 150;
+        let followed = words.get(j + 1).is_some_and(|n| (n.start_ms - s).abs() <= 30);
+        let repeats = words.get(j + 1).is_some_and(|n| n.text.trim() == words[i].text.trim());
+        if tiny && followed && (j > i || repeats) {
+            i = j + 1;
+            continue;
+        }
+        out.push(words[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// Builds cues from sentence-level segments (used for translations, whose word timing
+/// doesn't follow the audio). Long segments are split into readable cues at punctuation
+/// or word boundaries, with time shared out in proportion to text length.
+pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec<Cue> {
+    let mut segments = drop_instant_duplicates(segments);
+    // A decoding loop repeats the same sentence segment after segment: keep one,
+    // spanning the whole stretch.
+    let key = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    segments.dedup_by(|b, a| {
+        if !key(&a.text).is_empty() && key(&a.text) == key(&b.text) {
+            a.end_ms = a.end_ms.max(b.end_ms);
+            true
+        } else {
+            false
+        }
+    });
+    let mut cues = Vec::new();
+    for seg in &segments {
+        let text = seg.text.trim();
+        if text.is_empty() || is_noise(text) {
+            continue;
+        }
+        let limit = line_limit(text, opts.max_line_chars) * opts.max_lines;
+        let chunks = split_text(text, limit);
+        let total: usize = chunks.iter().map(|c| graphemes(c).max(1)).sum();
+        let span = (seg.end_ms - seg.start_ms).max(1);
+        let mut at = seg.start_ms;
+        for (k, chunk) in chunks.iter().enumerate() {
+            let end = if k + 1 == chunks.len() { seg.end_ms } else { at + span * graphemes(chunk).max(1) as i64 / total as i64 };
+            cues.push(Cue::new(at, end.max(at + 1), wrap_text(chunk, opts.max_line_chars)));
+            at = end;
+        }
+    }
+    fix_timing(&mut cues, opts, media_end_ms);
+    cues
+}
+
+/// Splits text into pieces of at most `limit` graphemes, preferring to break after
+/// sentence punctuation, then clause punctuation, then at spaces.
+fn split_text(text: &str, limit: usize) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut rest = text.trim().to_string();
+    while graphemes(&rest) > limit {
+        let idx: Vec<(usize, char)> = rest.char_indices().collect();
+        let cut_at_grapheme = |n: usize| rest.grapheme_indices(true).nth(n).map(|(i, _)| i).unwrap_or(rest.len());
+        let hard = cut_at_grapheme(limit);
+        let min = cut_at_grapheme(limit / 3);
+        let pick = |set: &[char]| {
+            idx.iter().rev().find(|(i, c)| *i < hard && *i >= min && set.contains(c)).map(|(i, c)| i + c.len_utf8())
+        };
+        let cut = pick(SENTENCE_END)
+            .or_else(|| pick(CLAUSE_END))
+            .or_else(|| idx.iter().rev().find(|(i, c)| *i <= hard && *i >= min && *c == ' ').map(|(i, _)| *i))
+            .unwrap_or(hard);
+        let (a, b) = rest.split_at(cut);
+        pieces.push(a.trim().to_string());
+        rest = b.trim().to_string();
+    }
+    if !rest.is_empty() {
+        pieces.push(rest);
+    }
+    pieces
 }
 
 fn is_noise(t: &str) -> bool {
@@ -287,6 +377,46 @@ mod tests {
     fn wraps_cjk_without_spaces() {
         let wrapped = wrap_text("今日はとても良い天気ですね散歩に行きましょう", 42);
         assert_eq!(wrapped.lines().count(), 2);
+    }
+
+    #[test]
+    fn drops_instant_duplicate_runs_from_vad() {
+        let w = |s, e, t: &str| Word { start_ms: s, end_ms: e, text: format!(" {t}") };
+        // Real whisper.cpp output shape: three words sharing 6650-6750, then the real words.
+        let words = vec![
+            w(6250, 6650, "হয়।"),
+            w(6650, 6750, "সক্রান্ত্র"), w(6650, 6750, "বিস্লেশন"), w(6650, 6750, "করে"),
+            w(6650, 11160, "সক্রান্ত্র"), w(11160, 11940, "বিস্লেশন"), w(11940, 12510, "করে"),
+        ];
+        let cues = segment(&words, &Options::default(), None);
+        let all: String = cues.iter().map(|c| c.text.replace('\n', " ")).collect::<Vec<_>>().join(" ");
+        assert_eq!(all.matches("সক্রান্ত্র").count(), 1, "{all}");
+    }
+
+    #[test]
+    fn translation_segments_split_into_readable_cues() {
+        let seg = Word {
+            start_ms: 0,
+            end_ms: 10_000,
+            text: " It was supposed to be cut down on Tuesday, but it was saved after an emergency court ruling. The results will be posted online.".into(),
+        };
+        let cues = from_segments(&[seg], &Options::default(), None);
+        assert!(cues.len() >= 2, "{cues:?}");
+        assert!(cues.windows(2).all(|p| p[0].end_ms <= p[1].start_ms));
+        assert_eq!(cues.first().unwrap().start_ms, 0);
+        for c in &cues {
+            assert!(c.text.lines().count() <= 2 && c.text.lines().all(|l| graphemes(l) <= 42), "{c:?}");
+        }
+        let joined: String = cues.iter().map(|c| c.text.replace('\n', " ")).collect::<Vec<_>>().join(" ");
+        assert!(joined.starts_with("It was supposed") && joined.ends_with("posted online."));
+    }
+
+    #[test]
+    fn repeated_translation_segments_collapse() {
+        let seg = |s, e| Word { start_ms: s, end_ms: e, text: " The first thing is to focus on public websites.".into() };
+        let cues = from_segments(&[seg(12_000, 13_000), seg(13_000, 14_000), seg(14_000, 15_000)], &Options::default(), None);
+        assert_eq!(cues.len(), 1, "{cues:?}");
+        assert_eq!((cues[0].start_ms, cues[0].end_ms >= 15_000), (12_000, true));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{prompt, script, segment, whisper};
+use crate::asr::{prompt, script, segment, vad, whisper};
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -67,6 +67,8 @@ struct Ctx<'a> {
     report: &'a Reporter,
     scratch: &'a ScratchDir,
     seg: segment::Options,
+    /// Speech regions found by voice activity detection (empty if unknown).
+    speech: vad::Segments,
 }
 
 pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
@@ -88,18 +90,21 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     if let Some(n) = req.max_line_chars {
         seg.max_line_chars = n.clamp(16, 80);
     }
-    let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg };
+    let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg, speech: Vec::new() };
 
     let wav = extract_wav(&ctx, &video, req.audio_stream_index, req.duration_ms).await?;
 
-    report.stage("transcribing", None, Some("detecting".into()));
+    report.stage("transcribing", None, Some("listening".into()));
+    let speech = find_speech(&ctx, &wav).await?;
+    let first_speech = speech.first().map(|s| (s.0 - 300).max(0)).unwrap_or(0);
+
     let mut opts = whisper::Options {
         model: transcribe_model,
         language: spoken.clone(),
         translate: false,
         use_gpu: req.use_gpu,
-        vad_model: paths.vad_model(),
         threads: whisper::default_threads(),
+        word_timestamps: true,
         prompt: None,
     };
     let mut uncertain = None;
@@ -110,7 +115,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         if let Some(m) = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m)) {
             detect_opts.model = models::whisper_path(paths, m);
         }
-        if let Some((lang, p)) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, cancel).await? {
+        if let Some((lang, p)) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, first_speech, cancel).await? {
             if p < 0.5 {
                 uncertain = Some(format!("language_uncertain:{lang}:{p:.2}"));
             }
@@ -118,11 +123,8 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         }
     }
     opts.prompt = opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string);
-    report.stage("transcribing", Some(0.0), None);
-    let mut t = whisper::transcribe(&paths.tool("whisper-cli")?, &wav, &scratch.path().join("transcript"), &opts, cancel, |p| {
-        report.stage("transcribing", Some(p), None)
-    })
-    .await?;
+    let ctx = Ctx { speech, ..ctx };
+    let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
     let mut warnings: Vec<String> = uncertain.into_iter().collect();
     if req.use_gpu && !t.used_gpu {
         warnings.push("gpu_fallback".to_string());
@@ -131,17 +133,19 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         warnings.push("text_repaired".to_string());
     }
     let language = t.language.clone().or(spoken.clone()).unwrap_or_else(|| "und".into());
-    if script::uses_bengali_script(&language) {
-        for w in &mut t.words {
-            w.text = script::devanagari_to_bengali(&w.text);
-        }
-    }
-    let cues = segment::segment(&t.words, &ctx.seg, Some(req.duration_ms));
-    if cues.is_empty() {
+    let mut cues = segment::segment(&t.words, &ctx.seg, Some(req.duration_ms));
+    if cues.is_empty() && missed.is_empty() {
         return Err(AppError::new(
             ErrorCode::NoSpeech,
             "No speech was found in this video's sound track.",
         ));
+    }
+    if !missed.is_empty() {
+        // Speech that couldn't be recognized becomes an empty caption the user must
+        // review, so nothing is left out of the export silently.
+        warnings.push(format!("unrecognized:{}", missed.len()));
+        cues.extend(missed.iter().map(|&(s, e)| Cue::new(s, e, "")));
+        cues.sort_by_key(|c| (c.start_ms, c.end_ms));
     }
     let original = Track {
         id: uuid::Uuid::new_v4().to_string(),
@@ -176,7 +180,7 @@ pub async fn translate_existing(paths: &Paths, req: TranslateRequest, job_id: &s
     if let Some(n) = req.max_line_chars {
         seg.max_line_chars = n.clamp(16, 80);
     }
-    let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg };
+    let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg, speech: Vec::new() };
     let plan = routes::plan(&source_lang, &req.target_language)
         .ok_or_else(|| AppError::new(ErrorCode::TranslationUnavailable, "Captions can't be translated into this language yet."))?;
     // Only Whisper-based routes need the audio again.
@@ -194,6 +198,74 @@ pub async fn translate_existing(paths: &Paths, req: TranslateRequest, job_id: &s
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
     Ok(GenerateResult { tracks, active_track_id, detected_language: Some(source_lang), used_gpu, warnings: vec![] })
+}
+
+/// Runs the recognizer over the speech, then re-checks any stretch of speech that came
+/// back without words. Returns the transcript (words filtered to speech, script repaired)
+/// and the speech spans that still couldn't be recognized.
+async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_ms: i64) -> AppResult<(whisper::Transcript, vad::Segments)> {
+    let cli = ctx.paths.tool("whisper-cli")?;
+    let max_ms = vad::chunk_limit_ms(opts.language.as_deref());
+    let spans = if ctx.speech.is_empty() {
+        whisper::fixed_windows(0, duration_ms, max_ms)
+    } else {
+        vad::plan_chunks(&ctx.speech, max_ms, 1_500, 250, duration_ms)
+    };
+    let stage = if opts.translate { "translating" } else { "transcribing" };
+    let detail = opts.translate.then(|| "whisper".to_string());
+    ctx.report.stage(stage, Some(0.0), detail.clone());
+    let dir = ctx.scratch.path().join(if opts.translate { "en" } else { "asr" });
+    let weight = if ctx.speech.is_empty() { 1.0 } else { 0.92 };
+    let mut t = whisper::transcribe_spans(&cli, wav, &spans, &dir, opts, ctx.cancel, |p| {
+        ctx.report.stage(stage, Some(p * weight), detail.clone())
+    })
+    .await?;
+    t.words = vad::keep_speech(std::mem::take(&mut t.words), &ctx.speech, 400);
+
+    // Second chance for speech that produced no words (skipped or cut-off passages).
+    let gaps = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
+    if !gaps.is_empty() {
+        log::info!("re-checking {} stretches of speech without words", gaps.len());
+        let retry: Vec<(i64, i64)> = gaps
+            .iter()
+            .flat_map(|&(s, e)| whisper::fixed_windows((s - 300).max(0), (e + 300).min(duration_ms), max_ms))
+            .collect();
+        // A different decoding context: no initial prompt.
+        let mut retry_opts = opts.clone();
+        retry_opts.prompt = None;
+        if let Ok(t2) = whisper::transcribe_spans(&cli, wav, &retry, &dir, &retry_opts, ctx.cancel, |p| {
+            ctx.report.stage(stage, Some(weight + p * (1.0 - weight)), detail.clone())
+        })
+        .await
+        {
+            let extra = vad::keep_speech(t2.words, &gaps, 300);
+            t.used_gpu &= t2.used_gpu;
+            t.repaired_text |= t2.repaired_text;
+            t.words.extend(extra);
+            t.words.sort_by_key(|w| w.start_ms);
+        }
+    }
+    let lang = opts.language.clone().or_else(|| t.language.clone()).unwrap_or_default();
+    if !opts.translate && script::uses_bengali_script(&lang) {
+        for w in &mut t.words {
+            w.text = script::devanagari_to_bengali(&w.text);
+        }
+    }
+    let missed = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
+    Ok((t, missed))
+}
+
+/// Finds speech with the bundled VAD. A file with no speech at all stops here with a
+/// clear message instead of running the slow recognizer.
+async fn find_speech(ctx: &Ctx<'_>, wav: &Path) -> AppResult<vad::Segments> {
+    let (Some(model), Ok(tool)) = (ctx.paths.vad_model(), ctx.paths.tool("whisper-vad")) else {
+        return Ok(Vec::new());
+    };
+    let speech = vad::speech_segments(&tool, wav, &model, whisper::default_threads(), ctx.cancel).await?;
+    if vad::speech_ms(&speech) < 300 {
+        return Err(AppError::new(ErrorCode::NoSpeech, "No speech was found in this video's sound track."));
+    }
+    Ok(speech)
 }
 
 async fn extract_wav(ctx: &Ctx<'_>, video: &Path, stream: u32, duration_ms: i64) -> AppResult<PathBuf> {
@@ -255,21 +327,23 @@ async fn whisper_english(
     duration_ms: i64,
 ) -> AppResult<(Track, bool)> {
     let model = translation_model(ctx.paths, transcribe_model_id, translate_model_id)?;
-    ctx.report.stage("translating", Some(0.0), Some("whisper".into()));
     let opts = whisper::Options {
         model,
         language: (source.language != "und").then(|| source.language.clone()),
         translate: true,
         use_gpu,
-        vad_model: ctx.paths.vad_model(),
         threads: whisper::default_threads(),
-        prompt: prompt::initial_prompt("en").map(str::to_string),
+        word_timestamps: false,
+        // No prompt: translations punctuate well without one, and a prompt can leak
+        // into the output when the speech is unclear.
+        prompt: None,
     };
-    let t = whisper::transcribe(&ctx.paths.tool("whisper-cli")?, wav, &ctx.scratch.path().join("english"), &opts, ctx.cancel, |p| {
-        ctx.report.stage("translating", Some(p), Some("whisper".into()))
-    })
-    .await?;
-    let cues = segment::segment(&t.words, &ctx.seg, Some(duration_ms));
+    // Re-use speech regions from this job, or find them (adding a language later).
+    let speech = if ctx.speech.is_empty() { find_speech(ctx, wav).await.unwrap_or_default() } else { ctx.speech.clone() };
+    let sub = Ctx { paths: ctx.paths, cancel: ctx.cancel, report: ctx.report, scratch: ctx.scratch, seg: ctx.seg.clone(), speech };
+    let (t, _) = recognize(&sub, wav, &opts, duration_ms).await?;
+    let sentences = t.words.clone();
+    let cues = segment::from_segments(&sentences, &ctx.seg, Some(duration_ms));
     if cues.is_empty() {
         return Err(AppError::new(ErrorCode::TranslationFailed, "The English translation came out empty."));
     }

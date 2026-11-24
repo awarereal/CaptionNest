@@ -1,4 +1,4 @@
-//! Runs `whisper-cli` and reads its word-level JSON output.
+//! Runs `whisper-cli` on speech chunks and reads its word-level JSON output.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::Word;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::media::process;
+use crate::media::{process, wav};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -17,8 +17,10 @@ pub struct Options {
     /// Translate the speech into English.
     pub translate: bool,
     pub use_gpu: bool,
-    pub vad_model: Option<PathBuf>,
     pub threads: usize,
+    /// Word-level timing (-ml 1 -sow). Off for translation, whose word times don't
+    /// follow the audio; whole sentences are used instead.
+    pub word_timestamps: bool,
     /// Initial prompt (see `prompt.rs`).
     pub prompt: Option<String>,
 }
@@ -38,11 +40,19 @@ pub fn default_threads() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8)
 }
 
-/// Transcribes (or translates) `wav`. If the GPU run fails, retries once on the CPU.
-pub async fn transcribe(
+/// Files per whisper-cli run. One run loads the model once and processes every file;
+/// batching keeps command lines short (Windows limits them to 32,767 characters).
+const BATCH: usize = 200;
+
+/// Recognizes the given spans of `wav` (each at most ~30 s), returning words on the
+/// original timeline. Each span is decoded on its own, so a misrecognition can't spread
+/// across a long video, and no stretch of speech is skipped by the decoder jumping
+/// ahead. If the GPU fails, the remaining work continues on the processor.
+pub async fn transcribe_spans(
     whisper_cli: &Path,
     wav: &Path,
-    out_base: &Path,
+    spans: &[(i64, i64)],
+    work_dir: &Path,
     opts: &Options,
     cancel: &CancellationToken,
     mut on_progress: impl FnMut(f32),
@@ -50,44 +60,83 @@ pub async fn transcribe(
     if !opts.model.is_file() {
         return Err(AppError::new(ErrorCode::ModelMissing, "The speech recognition model isn't installed yet."));
     }
-    let first = run_once(whisper_cli, wav, out_base, opts, opts.use_gpu, cancel, &mut on_progress).await;
-    match first {
-        Err(e) if opts.use_gpu && !e.is_cancelled() && e.code != ErrorCode::DiskFull => {
-            log::warn!("whisper GPU run failed, retrying on CPU: {e:?}");
-            on_progress(0.0);
-            run_once(whisper_cli, wav, out_base, opts, false, cancel, &mut on_progress).await
+    std::fs::create_dir_all(work_dir)?;
+    let info = wav::read_info(wav).map_err(|e| AppError::new(ErrorCode::ToolFailed, "The prepared audio couldn't be read.").with_detail(e.to_string()))?;
+    let total: i64 = spans.iter().map(|(s, e)| (e - s).max(1)).sum::<i64>().max(1);
+    let mut done_ms = 0i64;
+    let mut use_gpu = opts.use_gpu;
+    let mut out = Transcript { words: Vec::new(), language: opts.language.clone(), used_gpu: use_gpu, repaired_text: false };
+
+    for (batch_no, batch) in spans.chunks(BATCH).enumerate() {
+        let names: Vec<String> = (0..batch.len()).map(|i| format!("c{:03}-{:05}.wav", batch_no, i)).collect();
+        for (name, &(s, e)) in names.iter().zip(batch) {
+            wav::write_slice(wav, &info, s, e, &work_dir.join(name))?;
         }
-        other => other,
+        let durations: Vec<i64> = batch.iter().map(|(s, e)| (e - s).max(1)).collect();
+        let result = run_batch(whisper_cli, work_dir, &names, &durations, opts, use_gpu, cancel, |p| {
+            on_progress(((done_ms as f64 + p as f64) / total as f64).clamp(0.0, 1.0) as f32)
+        })
+        .await;
+        match result {
+            Ok(()) => {}
+            Err(e) if use_gpu && !e.is_cancelled() && e.code != ErrorCode::DiskFull => {
+                log::warn!("whisper GPU run failed, continuing on the processor: {e:?}");
+                use_gpu = false;
+                out.used_gpu = false;
+                run_batch(whisper_cli, work_dir, &names, &durations, opts, false, cancel, |p| {
+                    on_progress(((done_ms as f64 + p as f64) / total as f64).clamp(0.0, 1.0) as f32)
+                })
+                .await?;
+            }
+            Err(e) => return Err(e),
+        }
+        for (name, &(s, _)) in names.iter().zip(batch) {
+            let json = work_dir.join(format!("{name}.json"));
+            let bytes = std::fs::read(&json).map_err(|e| {
+                AppError::new(ErrorCode::ToolFailed, "Speech recognition finished without results.").with_detail(format!("{name}: {e}"))
+            })?;
+            let mut t = parse_json(&bytes)?;
+            if let Some(p) = &opts.prompt {
+                t.words = super::prompt::strip_echo(t.words, p);
+            }
+            out.repaired_text |= t.repaired_text;
+            if out.language.is_none() {
+                out.language = t.language;
+            }
+            out.words.extend(t.words.into_iter().map(|w| Word { start_ms: w.start_ms + s, end_ms: w.end_ms + s, text: w.text }));
+            let _ = std::fs::remove_file(&json);
+            let _ = std::fs::remove_file(work_dir.join(name));
+        }
+        done_ms += durations.iter().sum::<i64>();
     }
+    out.words.sort_by_key(|w| w.start_ms);
+    on_progress(1.0);
+    Ok(out)
 }
 
-async fn run_once(
+#[allow(clippy::too_many_arguments)]
+async fn run_batch(
     whisper_cli: &Path,
-    wav: &Path,
-    out_base: &Path,
+    work_dir: &Path,
+    names: &[String],
+    durations: &[i64],
     opts: &Options,
     use_gpu: bool,
     cancel: &CancellationToken,
-    on_progress: &mut impl FnMut(f32),
-) -> AppResult<Transcript> {
-    let json_path = out_base.with_extension("json");
-    let _ = std::fs::remove_file(&json_path);
-
+    mut on_progress: impl FnMut(i64),
+) -> AppResult<()> {
     let mut cmd = process::command(whisper_cli);
+    // Short relative file names keep the command line small.
+    cmd.current_dir(work_dir);
     cmd.arg("-m").arg(&opts.model)
-        .arg("-f").arg(wav)
-        .arg("-of").arg(out_base)
-        .args(["-oj", "-ml", "1", "-sow", "-pp", "-sns"])
+        .args(["-oj", "-pp", "-sns"])
         .args(["-t", &opts.threads.to_string()])
         .args(["-l", opts.language.as_deref().unwrap_or("auto")]);
+    if opts.word_timestamps {
+        cmd.args(["-ml", "1", "-sow"]);
+    }
     if opts.translate {
         cmd.arg("-tr");
-    }
-    if let Some(vad) = &opts.vad_model {
-        // Skip non-speech regions (reduces invented captions during silence and music).
-        // whisper.cpp maps timestamps back to the original audio timeline.
-        cmd.arg("--vad").arg("-vm").arg(vad)
-            .args(["-vt", "0.5", "-vspd", "250", "-vsd", "300", "-vp", "200"]);
     }
     if let Some(p) = &opts.prompt {
         cmd.arg("--prompt").arg(p);
@@ -95,22 +144,26 @@ async fn run_once(
     if !use_gpu {
         cmd.arg("-ng");
     }
+    for n in names {
+        cmd.arg("-f").arg(n);
+    }
 
-    let mut detected = None;
-    let out = process::run_streaming(
-        cmd,
-        cancel,
-        false,
-        |_| {},
-        |line| {
-            if let Some(p) = parse_progress(line) {
-                on_progress(p);
+    // Progress: whisper-cli announces each file, then reports 0-100% within it.
+    let mut file_idx: Option<usize> = None;
+    let mut before: i64 = 0;
+    let out = process::run_streaming(cmd, cancel, false, |_| {}, |line| {
+        if line.contains(": processing '") {
+            if let Some(i) = file_idx {
+                before += durations.get(i).copied().unwrap_or(0);
             }
-            if let Some(lang) = parse_detected_language(line) {
-                detected = Some(lang);
-            }
-        },
-    )
+            let i = file_idx.map_or(0, |i| i + 1);
+            file_idx = Some(i);
+            on_progress(before);
+        } else if let Some(p) = parse_progress(line) {
+            let cur = file_idx.and_then(|i| durations.get(i)).copied().unwrap_or(0);
+            on_progress(before + (cur as f32 * p) as i64);
+        }
+    })
     .await?;
 
     if !out.status.success() {
@@ -124,18 +177,20 @@ async fn run_once(
         };
         return Err(err.with_detail(out.stderr_tail));
     }
+    Ok(())
+}
 
-    let bytes = std::fs::read(&json_path).map_err(|e| {
-        AppError::new(ErrorCode::ToolFailed, "Speech recognition finished without results.").with_detail(e.to_string())
-    })?;
-    let _ = std::fs::remove_file(&json_path);
-    let mut t = parse_json(&bytes)?;
-    if t.language.is_none() {
-        t.language = detected.or_else(|| opts.language.clone());
+/// Splits `[start, end)` into windows of at most `max_ms` (used when no voice activity
+/// information is available).
+pub fn fixed_windows(start: i64, end: i64, max_ms: i64) -> Vec<(i64, i64)> {
+    let mut v = Vec::new();
+    let mut s = start;
+    while s < end {
+        let e = (s + max_ms).min(end);
+        v.push((s, e));
+        s = e;
     }
-    t.used_gpu = use_gpu;
-    on_progress(1.0);
-    Ok(t)
+    v
 }
 
 /// Detects the spoken language from the first 30 seconds of speech (one encoder pass).
@@ -145,14 +200,16 @@ pub async fn detect_language(
     whisper_cli: &Path,
     wav: &Path,
     opts: &Options,
+    start_ms: i64,
     cancel: &CancellationToken,
 ) -> AppResult<Option<(String, f32)>> {
     let run = |gpu: bool| {
         let mut cmd = process::command(whisper_cli);
         cmd.arg("-m").arg(&opts.model).arg("-f").arg(wav).args(["-dl", "-l", "auto"])
             .args(["-t", &opts.threads.to_string()]);
-        if let Some(vad) = &opts.vad_model {
-            cmd.arg("--vad").arg("-vm").arg(vad);
+        if start_ms > 0 {
+            // Listen from the first speech, not from leading music or silence.
+            cmd.args(["-ot", &start_ms.to_string()]);
         }
         if !gpu {
             cmd.arg("-ng");
@@ -287,6 +344,12 @@ mod tests {
         let (l, p) = parse_detection("whisper_full_with_state: auto-detected language: gu (p = 0.210000)").unwrap();
         assert_eq!(l, "gu");
         assert!((p - 0.21).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fixed_windows_cover_the_range() {
+        assert_eq!(fixed_windows(0, 25_000, 12_000), vec![(0, 12_000), (12_000, 24_000), (24_000, 25_000)]);
+        assert!(fixed_windows(5, 5, 1_000).is_empty());
     }
 
     #[test]

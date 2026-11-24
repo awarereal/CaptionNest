@@ -5,7 +5,7 @@
 #
 # arm64: Metal GPU backend (shader library embedded) + Accelerate, CPU fallback with --no-gpu.
 # x86_64: CPU + Accelerate (Metal on Intel GPUs is not reliable enough to ship).
-# Output: build/tools/<target-triple>/whisper-cli
+# Output: build/tools/<target-triple>/{whisper-cli,whisper-vad}
 set -euo pipefail
 
 ARCH="${1:?usage: build-whisper-macos.sh arm64|x86_64}"
@@ -43,10 +43,11 @@ cmake -S "$WORK/src" -B "$WORK/build" ${GEN[@]+"${GEN[@]}"} \
   -DWHISPER_SDL2=OFF \
   -DWHISPER_CURL=OFF
 
-cmake --build "$WORK/build" --config Release --target whisper-cli -j"$(sysctl -n hw.ncpu)"
+cmake --build "$WORK/build" --config Release --target whisper-cli whisper-vad-speech-segments -j"$(sysctl -n hw.ncpu)"
 
 cp "$WORK/build/bin/whisper-cli" "$OUT/whisper-cli"
-strip -x "$OUT/whisper-cli"
+cp "$WORK/build/bin/whisper-vad-speech-segments" "$OUT/whisper-vad"
+strip -x "$OUT/whisper-cli" "$OUT/whisper-vad"
 echo "whisper.cpp $WHISPER_VERSION ($WHISPER_URL), Metal=$METAL, target $TRIPLE" > "$OUT/WHISPER_BUILD.txt"
 
 echo "built: $OUT/whisper-cli"

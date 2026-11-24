@@ -4,3 +4,4 @@ pub mod extract;
 pub mod preview;
 pub mod probe;
 pub mod process;
+pub mod wav;

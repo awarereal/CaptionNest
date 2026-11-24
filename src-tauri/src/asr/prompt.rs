@@ -8,7 +8,7 @@
 
 pub fn initial_prompt(lang: &str) -> Option<&'static str> {
     Some(match lang {
-        "en" => "Hello, and welcome. This is how we speak.",
+        "en" => "Punctuation matters: commas, periods, and capital letters.",
         "bn" => "আমি বাংলায় কথা বলি। আজ আবহাওয়া ভালো, তাই না?",
         "hi" => "नमस्ते, आप कैसे हैं? आज मौसम अच्छा है।",
         "ar" => "مرحبًا، كيف حالك؟ الطقس جميل اليوم.",
@@ -34,9 +34,62 @@ pub fn initial_prompt(lang: &str) -> Option<&'static str> {
     })
 }
 
+/// Removes the initial prompt when Whisper outputs it as if it were speech (this can
+/// happen on unclear audio). To never delete real speech, a chunk is only cleared when
+/// it consists of nothing but whole prompt sentences; prompts are chosen to be phrases
+/// people don't naturally say.
+pub fn strip_echo(words: Vec<super::Word>, prompt: &str) -> Vec<super::Word> {
+    let norm = |s: &str| -> String { s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect() };
+    let sentences: Vec<String> = prompt
+        .split(['.', '?', '!', '।', '؟', '。', '۔'])
+        .map(norm)
+        .filter(|s| s.chars().count() >= 6)
+        .collect();
+    if sentences.is_empty() {
+        return words;
+    }
+    let mut start = 0;
+    'outer: while start < words.len() {
+        let mut acc = String::new();
+        for end in start..words.len().min(start + 24) {
+            acc.push_str(&norm(&words[end].text));
+            if sentences.iter().any(|s| *s == acc) {
+                start = end + 1;
+                continue 'outer;
+            }
+            if !sentences.iter().any(|s| s.starts_with(&acc)) {
+                break;
+            }
+        }
+        break;
+    }
+    if start > 0 && start == words.len() { Vec::new() } else { words }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asr::Word;
+
+    fn w(t: &str) -> Word {
+        Word { start_ms: 0, end_ms: 1, text: format!(" {t}") }
+    }
+
+    #[test]
+    fn clears_a_chunk_that_only_repeats_the_prompt() {
+        let p = initial_prompt("en").unwrap();
+        let words = vec![w("Punctuation"), w("matters:"), w("commas,"), w("periods,"), w("and"), w("capital"), w("letters.")];
+        assert!(strip_echo(words, p).is_empty());
+    }
+
+    #[test]
+    fn never_removes_real_speech() {
+        let p = initial_prompt("en").unwrap();
+        let mixed = vec![w("Punctuation"), w("matters:"), w("commas,"), w("periods,"), w("and"), w("capital"), w("letters."), w("Real"), w("speech.")];
+        assert_eq!(strip_echo(mixed, p).len(), 9);
+        let normal = vec![w("Hello"), w("everyone,"), w("welcome"), w("back.")];
+        assert_eq!(strip_echo(normal, p).len(), 4);
+    }
 
     #[test]
     fn core_languages_have_punctuated_prompts() {

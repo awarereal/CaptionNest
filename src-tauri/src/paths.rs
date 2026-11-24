@@ -70,6 +70,7 @@ impl Paths {
         }
     }
 
+    /// Silero voice activity model bundled with the app.
     pub fn vad_model(&self) -> Option<PathBuf> {
         let p = self.bundled_models.join("ggml-silero-v6.2.0.bin");
         p.is_file().then_some(p)

@@ -3,6 +3,7 @@
 pub mod prompt;
 pub mod script;
 pub mod segment;
+pub mod vad;
 pub mod whisper;
 
 /// One recognized word (or word-like chunk) with its time on the original timeline.

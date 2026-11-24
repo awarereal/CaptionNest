@@ -49,6 +49,7 @@ export function WorkspaceScreen() {
       <section className="ws__video">
         {videoMissing && <RelinkBanner />}
         <UncertainLanguage />
+        <UnrecognizedSpeech />
         {warnings.includes("gpu_fallback") && (
           <Banner tone="teal" onClose={() => useStore.setState({ warnings: warnings.filter((w) => w !== "gpu_fallback") })}>
             Graphics acceleration wasn't available, so this run used the processor. Results are the same; it just took longer.
@@ -91,6 +92,33 @@ function Banner({ tone, children, onClose, action }: { tone: "gold" | "teal" | "
         </IconButton>
       )}
     </div>
+  );
+}
+
+/** Speech the recognizer couldn't turn into words is kept as empty captions to review. */
+function UnrecognizedSpeech() {
+  const warnings = useStore((s) => s.warnings);
+  const track = useActiveTrack();
+  const w = warnings.find((x) => x.startsWith("unrecognized:"));
+  const empty = track?.kind === "original" ? sortCues(track.cues).filter((c) => !c.text.trim()) : [];
+  if (!w || empty.length === 0) return null;
+  const show = () => {
+    useStore.getState().selectCue(empty[0].id);
+    usePlayhead.getState().seek(empty[0].startMs);
+  };
+  return (
+    <Banner
+      tone="gold"
+      onClose={() => useStore.setState({ warnings: warnings.filter((x) => x !== w) })}
+      action={
+        <Button size="sm" variant="secondary" onClick={show}>
+          Show
+        </Button>
+      }
+    >
+      {empty.length === 1 ? "One stretch of speech" : `${empty.length} stretches of speech`} couldn't be recognized. They're kept as empty
+      captions so nothing is missed: listen and type the words, or delete them.
+    </Banner>
   );
 }
 

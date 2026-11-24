@@ -30,3 +30,4 @@ dist-ssr
 /src-tauri/resources/licenses/FFMPEG_BUILD.txt
 /release/
 __pycache__/
+*.tsbuildinfo

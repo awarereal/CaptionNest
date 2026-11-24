@@ -1,0 +1,239 @@
+name: Build and test
+
+# Builds the bundled tools (FFmpeg, whisper.cpp) from pinned sources, runs the tests,
+# packages CaptionNest for each platform, smoke-tests the installed package on known
+# speech, and (for version tags) attaches everything to a draft GitHub release.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SMOKE_MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+  SMOKE_MODEL_SHA256: be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Build tools (cached)
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: build/tools/${{ matrix.target }}
+          key: tools-${{ matrix.target }}-${{ hashFiles('scripts/tools/*') }}
+
+      - name: Install build dependencies
+        run: brew install cmake ninja nasm
+
+      - name: Build FFmpeg and whisper.cpp
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          scripts/tools/build-ffmpeg-macos.sh ${{ matrix.arch }}
+          scripts/tools/build-whisper-macos.sh ${{ matrix.arch }}
+
+      - name: Stage tools
+        run: scripts/tools/stage-tools.sh ${{ matrix.target }}
+
+      - name: Frontend tests and type check
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build app and disk image
+        run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Smoke test the disk image
+        run: |
+          curl -fL -o "$RUNNER_TEMP/ggml-tiny.bin" "$SMOKE_MODEL_URL"
+          echo "$SMOKE_MODEL_SHA256  $RUNNER_TEMP/ggml-tiny.bin" | shasum -a 256 -c -
+          DMG="$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)"
+          scripts/ci/smoke-macos.sh "$DMG" "$RUNNER_TEMP/ggml-tiny.bin"
+
+      - name: Rename package
+        run: |
+          mkdir -p dist
+          DMG="$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)"
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          NAME="CaptionNest-$VERSION-macOS-${{ matrix.arch == 'arm64' && 'AppleSilicon' || 'Intel' }}.dmg"
+          cp "$DMG" "dist/$NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 150
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-crt-static
+
+      - name: Build tools (cached)
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: build/tools/x86_64-pc-windows-msvc
+          key: tools-win64-${{ hashFiles('scripts/tools/*') }}
+
+      - name: MSYS2 for FFmpeg
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc make nasm pkgconf mingw-w64-x86_64-zlib diffutils tar xz curl
+
+      - name: Build FFmpeg
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/tools/build-ffmpeg-windows.sh
+
+      - name: Vulkan SDK (GPU backend)
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          install_runtime: false
+          cache: true
+          stripdown: true
+        continue-on-error: true
+
+      - name: Build whisper.cpp
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          try { scripts/tools/build-whisper-windows.ps1 }
+          catch { Write-Warning "Vulkan build failed ($_); building CPU-only"; scripts/tools/build-whisper-windows.ps1 -NoVulkan }
+
+      - name: Stage tools
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/src)) { New-Item -ItemType Directory build/src | Out-Null }
+          $vad = "build/src/ggml-silero-v6.2.0.bin"
+          if (-not (Test-Path $vad)) { Invoke-WebRequest https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin -OutFile $vad }
+          scripts/tools/stage-tools.ps1
+
+      - name: Frontend tests and type check
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build installer
+        run: npx tauri build
+
+      - name: Smoke test the installer
+        shell: pwsh
+        run: |
+          Invoke-WebRequest $env:SMOKE_MODEL_URL -OutFile "$env:RUNNER_TEMP/ggml-tiny.bin"
+          if ((Get-FileHash "$env:RUNNER_TEMP/ggml-tiny.bin").Hash -ne $env:SMOKE_MODEL_SHA256.ToUpper()) { throw "model hash" }
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          scripts/ci/smoke-windows.ps1 -Installer $setup.FullName -Model "$env:RUNNER_TEMP/ggml-tiny.bin"
+
+      - name: Rename package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          Copy-Item $setup.FullName "dist/CaptionNest-$version-Windows-x64-Setup.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Add sources required by the LGPL and checksums
+        run: |
+          source scripts/tools/versions.env
+          curl -fL -o "artifacts/ffmpeg-$FFMPEG_VERSION.tar.xz" "$FFMPEG_URL"
+          echo "$FFMPEG_SHA256  artifacts/ffmpeg-$FFMPEG_VERSION.tar.xz" | sha256sum -c -
+          cp THIRD_PARTY_NOTICES.md docs/START-HERE.md artifacts/
+          (cd artifacts && sha256sum * > SHA256SUMS.txt)
+          ls -la artifacts
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" artifacts/* --draft \
+            --title "CaptionNest ${GITHUB_REF_NAME}" --notes-file docs/RELEASE-NOTES.md

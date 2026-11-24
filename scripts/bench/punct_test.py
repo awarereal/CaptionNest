@@ -7,7 +7,7 @@ import sys
 T = "src-tauri/resources/tools/whisper-cli"
 VAD = "src-tauri/resources/bundled-models/ggml-silero-v6.2.0.bin"
 cases = [
-    ("en", "build/samples/en.wav", "Hello, and welcome. This is how we speak."),
+    ("en", "build/samples/en.wav", "Punctuation matters: commas, periods, and capital letters."),
     ("bn", "build/samples/bn_say.wav", "আমি বাংলায় কথা বলি। আজ আবহাওয়া ভালো, তাই না?"),
 ]
 models = sys.argv[1:] or ["large-v3-q5_0", "large-v3-turbo-q5_0"]
