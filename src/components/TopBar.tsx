@@ -47,10 +47,13 @@ export function TopBar() {
               )}
             </div>
           </>
-        ) : (
-          <Wordmark />
-        )}
+        ) : null}
       </div>
+      {view !== "workspace" && view !== "prepare" && (
+        <div className="topbar__center" data-tauri-drag-region>
+          <Wordmark />
+        </div>
+      )}
       <div className="topbar__right">
         {inWork && (
           <>

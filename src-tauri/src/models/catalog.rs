@@ -19,6 +19,10 @@ pub struct WhisperModel {
     pub can_translate: bool,
     /// "transcribe" (transcription only) or "both".
     pub role: String,
+    /// Set for models trained for one language (e.g. "bn"); used automatically for
+    /// speech in that language.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +69,11 @@ pub fn argos() -> &'static ArgosCatalog {
 
 pub fn whisper_model(id: &str) -> Option<&'static WhisperModel> {
     whisper().models.iter().find(|m| m.id == id)
+}
+
+/// Installed-or-not, the specialised models for a language.
+pub fn language_models(lang: &str) -> impl Iterator<Item = &'static WhisperModel> + '_ {
+    whisper().models.iter().filter(move |m| m.language.as_deref() == Some(lang))
 }
 
 pub fn argos_package(id: &str) -> Option<&'static ArgosPackage> {

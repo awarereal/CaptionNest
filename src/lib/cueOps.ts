@@ -61,8 +61,9 @@ export function splitCue(cues: Cue[], id: string, opts: { caret?: number; atMs?:
     const ratio = flat.length > 0 ? at / flat.length : 0.5;
     mid = Math.round(cue.startMs + duration * Math.min(0.9, Math.max(0.1, ratio)));
   }
-  const a: Cue = { ...cue, endMs: mid, text: left };
-  const b: Cue = { id: newId(), startMs: mid, endMs: cue.endMs, text: right };
+  const inText = (t: string) => (cue.check ?? []).filter((w) => t.includes(w));
+  const a: Cue = { ...cue, endMs: mid, text: left, check: inText(left) };
+  const b: Cue = { id: newId(), startMs: mid, endMs: cue.endMs, text: right, check: inText(right) };
   return [...cues.slice(0, i), a, b, ...cues.slice(i + 1)];
 }
 
@@ -74,7 +75,8 @@ export function mergeWithNext(cues: Cue[], id: string): Cue[] {
   const a = sorted[i];
   const b = sorted[i + 1];
   const text = [a.text.trim(), b.text.trim()].filter(Boolean).join(" ");
-  const merged: Cue = { ...a, endMs: Math.max(a.endMs, b.endMs), text };
+  const check = [...new Set([...(a.check ?? []), ...(b.check ?? [])])];
+  const merged: Cue = { ...a, endMs: Math.max(a.endMs, b.endMs), text, check };
   return [...sorted.slice(0, i), merged, ...sorted.slice(i + 2)];
 }
 
@@ -89,6 +91,11 @@ export function offsetAll(cues: Cue[], deltaMs: number): Cue[] {
     }
     return { ...c, startMs: Math.round(start), endMs: Math.round(end) };
   });
+}
+
+/** Uncertain words that are still in the caption (edited-away words drop out). */
+export function wordsToCheck(cue: Cue): string[] {
+  return (cue.check ?? []).filter((w) => w && cue.text.includes(w));
 }
 
 /** Ids of cues that overlap the next cue in start order. */

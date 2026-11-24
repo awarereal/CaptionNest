@@ -235,6 +235,12 @@ export function ExportDialog() {
       </ul>
 
       {blocking.length > 0 && <p className="hint">Fix the captions marked in red, then export.</p>}
+      {track && track.cues.some((c) => (c.check ?? []).some((w) => w && c.text.includes(w))) && (
+        <p className="hint">
+          Some captions still have words marked to check. You can export now, or review them first with “to check · next” in the
+          caption list.
+        </p>
+      )}
       {overlaps.length > 0 && blocking.length === 0 && (
         <p className="hint">
           Overlapping captions may stack on screen in CapCut. “Fix overlaps” ends each caption where the next one begins.

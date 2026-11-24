@@ -19,7 +19,7 @@ import { Player } from "../components/Player";
 import { LanguagePicker, type PickerItem } from "../components/LanguagePicker";
 import { Badge, Button, ProgressBar, Select, formatBytes } from "../components/ui";
 import { SPOKEN_LANGUAGES, TIER_LABEL, language, languageName } from "../lib/languages";
-import { MODEL_INFO, modelName } from "../lib/models";
+import { MODEL_INFO, languageModelFor, modelName } from "../lib/models";
 import { formatDuration } from "../lib/time";
 import { api } from "../lib/api";
 import { describeError, type RecoveryAction } from "../lib/errors";
@@ -114,9 +114,11 @@ function CaptionOptions() {
   const spoken = settings.spokenLanguage;
   const caption = settings.captionLanguage;
   const installedWhisper = (models?.whisper ?? []).filter((m) => m.installed);
-  const model = installedWhisper.find((m) => m.id === settings.transcribeModelId) ?? installedWhisper[0];
+  const generalInstalled = installedWhisper.filter((m) => !m.language);
+  const model = installedWhisper.find((m) => m.id === settings.transcribeModelId && !m.language) ?? installedWhisper.find((m) => !m.language);
   const translator = installedWhisper.find((m) => MODEL_INFO[m.id]?.translates);
   const accurate = models?.whisper.find((m) => m.id === "large-v3-q5_0");
+  const banglaModel = languageModelFor(models?.whisper, "bn");
 
   // Argos targets: languages captions can be translated into.
   const argosTargets = useMemo(() => {
@@ -314,21 +316,45 @@ function CaptionOptions() {
         </div>
       )}
 
+      {(spoken === "bn" || spoken === "auto") && banglaModel && !banglaModel.installed && (
+        <div className="callout callout--gold">
+          <DownloadSimple size={18} />
+          <div className="callout__body">
+            <p>
+              <strong>{spoken === "bn" ? "For correct Bangla spelling, add the Bangla model" : "Bangla video? Add the Bangla model for correct spelling"}</strong> (
+              {formatBytes(banglaModel.sizeBytes)}). It's used automatically whenever the speech is Bangla.
+            </p>
+            {downloads[banglaModel.id] ? (
+              <DownloadStatus id={banglaModel.id} total={banglaModel.sizeBytes} partial={banglaModel.partialBytes} />
+            ) : (
+              <Button size="sm" variant="secondary" icon={<DownloadSimple size={15} />} onClick={() => void download(banglaModel.id)}>
+                {banglaModel.partialBytes > 0 ? "Resume download" : "Download"}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="options__model">
         <span className="options__model-label">
           <SlidersHorizontal size={15} /> Speech model
         </span>
-        {installedWhisper.length > 1 ? (
+        {generalInstalled.length > 1 ? (
           <Select
             label="Speech model"
             value={model?.id ?? ""}
             onChange={(v) => void update({ transcribeModelId: v })}
-            options={installedWhisper.map((m) => ({ value: m.id, label: modelName(m.id), hint: MODEL_INFO[m.id]?.bestFor }))}
+            options={installedWhisper.filter((m) => !m.language).map((m) => ({ value: m.id, label: modelName(m.id), hint: MODEL_INFO[m.id]?.bestFor }))}
           />
         ) : (
           <span className="options__model-name">{model ? modelName(model.id) : "None installed"}</span>
         )}
-        {(spoken === "bn" || spoken === "as") && model?.id === "small" && (
+        {(spoken === "bn" || spoken === "auto") && banglaModel?.installed && (
+          <p className="formrow__note">
+            <Info size={14} /> Bangla speech uses the Bangla model for correct spelling.
+          </p>
+        )}
+        {(spoken === "bn" || spoken === "as") && model?.id === "small" && !banglaModel?.installed && (
           <p className="formrow__note formrow__note--warn">
             <WarningCircle size={14} /> The Light model can't write Bengali script. Use Fast or Accurate for Bangla.
           </p>

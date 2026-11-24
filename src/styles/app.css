@@ -69,6 +69,16 @@
   padding-left: 84px;
 }
 
+/* Brand sits in the middle of the bar, clear of the window buttons. Clicks pass
+   through to the bar so the window can still be dragged by it. */
+.topbar__center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 .topbar__left,
 .topbar__right {
   display: flex;

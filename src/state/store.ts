@@ -102,6 +102,7 @@ interface Store {
   setActiveTrack: (id: string) => void;
   selectCue: (id: string | null) => void;
   setCueText: (id: string, text: string) => void;
+  markChecked: (id: string) => void;
   retimeCue: (id: string, startMs: number, endMs: number) => void;
   addCue: (atMs: number) => string | null;
   deleteCue: (id: string) => void;
@@ -152,10 +153,10 @@ export const useStore = create<Store>((set, get) => {
 
     async init() {
       const [info, settings, models] = await Promise.all([api.appInfo(), api.getSettings(), api.modelState()]);
-      const anyInstalled = models.whisper.some((m) => m.installed);
+      const anyInstalled = models.whisper.some((m) => m.installed && !m.language);
       let s = settings;
-      if (!s.transcribeModelId || !models.whisper.find((m) => m.id === s.transcribeModelId)?.installed) {
-        const pick = models.whisper.find((m) => m.installed && m.id === DEFAULT_MODEL_ID) ?? models.whisper.find((m) => m.installed);
+      if (!s.transcribeModelId || !models.whisper.find((m) => m.id === s.transcribeModelId && !m.language)?.installed) {
+        const pick = models.whisper.find((m) => m.installed && m.id === DEFAULT_MODEL_ID) ?? models.whisper.find((m) => m.installed && !m.language);
         if (pick) s = { ...s, transcribeModelId: pick.id };
       }
       set({ info, settings: s, models, view: anyInstalled || s.setupComplete ? "home" : "setup" });
@@ -178,7 +179,7 @@ export const useStore = create<Store>((set, get) => {
       set({ models });
       const s = get().settings;
       if (s && (!s.transcribeModelId || !models.whisper.find((m) => m.id === s.transcribeModelId)?.installed)) {
-        const pick = models.whisper.find((m) => m.installed && m.id === DEFAULT_MODEL_ID) ?? models.whisper.find((m) => m.installed);
+        const pick = models.whisper.find((m) => m.installed && m.id === DEFAULT_MODEL_ID) ?? models.whisper.find((m) => m.installed && !m.language);
         if (pick || s.transcribeModelId) await get().updateSettings({ transcribeModelId: pick?.id ?? null });
       }
     },
@@ -514,6 +515,7 @@ export const useStore = create<Store>((set, get) => {
     setActiveTrack: (id) => set({ activeTrackId: id, selectedCueId: null }),
     selectCue: (id) => set({ selectedCueId: id }),
     setCueText: (id, text) => commit((c) => ops.updateCue(c, id, { text }), `text:${id}`),
+    markChecked: (id) => commit((c) => ops.updateCue(c, id, { check: [] })),
     retimeCue: (id, s, e) => commit((c) => ops.retimeCue(c, id, s, e), `time:${id}`),
     addCue(atMs) {
       let newId: string | null = null;

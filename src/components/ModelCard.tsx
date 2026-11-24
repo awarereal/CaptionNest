@@ -70,7 +70,8 @@ export function ModelCard({
       <header className="model__head">
         <h3 className="model__name display">{info?.name ?? entry.id}</h3>
         {recommended && <Badge tone="gold">Recommended</Badge>}
-        {entry.installed && selected && <Badge tone="teal">In use</Badge>}
+        {entry.language === "bn" && <Badge tone="teal">For Bangla</Badge>}
+        {entry.installed && selected && !entry.language && <Badge tone="teal">In use</Badge>}
       </header>
       <p className="model__summary">{info?.summary}</p>
       {info && (
@@ -82,7 +83,11 @@ export function ModelCard({
       <ul className="model__facts">
         <li>
           {info?.translates ? <Translate size={15} /> : <Prohibit size={15} />}
-          {info?.translates ? "Can make English captions from any language" : "Captions in the spoken language only"}
+          {entry.language === "bn"
+            ? "Used automatically for Bangla speech"
+            : info?.translates
+              ? "Can make English captions from any language"
+              : "Captions in the spoken language only"}
         </li>
         <li className="mono">
           {formatBytes(entry.sizeBytes)} download · {formatBytes(entry.sizeBytes)} on disk
@@ -95,7 +100,7 @@ export function ModelCard({
               <CheckCircle size={17} weight="fill" /> Ready offline
             </span>
             <span className="spacer" />
-            {onUse && !selected && (
+            {onUse && !selected && !entry.language && (
               <Button size="sm" variant="secondary" onClick={onUse}>
                 Use this model
               </Button>

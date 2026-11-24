@@ -61,6 +61,7 @@ pub async fn run(app: &AppHandle, t: SelfTest) -> i32 {
             translate_model_id: None,
             use_gpu: true,
             max_line_chars: None,
+            use_language_models: Some(false),
             model_path_override: Some(t.model.to_string_lossy().into_owned()),
         };
         let reporter = Reporter::new(app.clone(), "self-test".into(), JobKind::Generate);

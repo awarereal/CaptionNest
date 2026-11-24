@@ -5,6 +5,8 @@ export interface Cue {
   startMs: number;
   endMs: number;
   text: string;
+  /** Words the recognizer was unsure about; shown for review, never exported. */
+  check?: string[];
 }
 
 export type TrackKind = "original" | "translation";
@@ -123,6 +125,8 @@ export interface WhisperModelEntry {
   sha256: string;
   canTranslate: boolean;
   role: string;
+  /** Set for models trained for one language; used automatically for that language. */
+  language?: string | null;
   installed: boolean;
   downloading: boolean;
   partialBytes: number;

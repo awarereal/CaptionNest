@@ -38,6 +38,26 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
     translates: false,
     bestFor: "Quick captions in the spoken language",
   },
+  "large-v3-turbo-bn-q5_0": {
+    id: "large-v3-turbo-bn-q5_0",
+    name: "Bangla",
+    summary:
+      "Trained by Mozilla AI on Bangla speech, so it spells Bangla far more accurately than the general models. Used automatically whenever the speech is Bangla.",
+    speed: 3,
+    accuracy: 3,
+    translates: false,
+    bestFor: "Bangla speech with correct spelling",
+  },
+  "large-v3-bn-q5_0": {
+    id: "large-v3-bn-q5_0",
+    name: "Bangla",
+    summary:
+      "Trained by Mozilla AI on Bangla speech, so it spells Bangla far more accurately than the general models. Used automatically whenever the speech is Bangla.",
+    speed: 1,
+    accuracy: 3,
+    translates: false,
+    bestFor: "Bangla speech with correct spelling",
+  },
   small: {
     id: "small",
     name: "Light",
@@ -56,5 +76,9 @@ export function recommendedModelId(info: AppInfo | null): string {
   if (info?.os === "macos" && info.arch === "aarch64") return "large-v3-q5_0";
   return "large-v3-turbo-q5_0";
 }
+
+/** The installed-or-not model trained for a language, if the catalog has one. */
+export const languageModelFor = <T extends { language?: string | null }>(models: T[] | undefined, lang: string) =>
+  (models ?? []).find((m) => m.language === lang);
 
 export const modelName = (id: string | null | undefined) => (id && MODEL_INFO[id]?.name) || id || "No model";

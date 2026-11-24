@@ -44,6 +44,24 @@ pub fn default_threads() -> usize {
 /// batching keeps command lines short (Windows limits them to 32,767 characters).
 const BATCH: usize = 200;
 
+/// How many recognizer processes run side by side. Two processes keep the GPU (or the
+/// processor's cores) busier; on CaptionNest's tests this was about 20% faster.
+pub fn parallel_processes(use_gpu: bool) -> usize {
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if (use_gpu && cfg!(all(target_os = "macos", target_arch = "aarch64"))) || cores >= 8 { 2 } else { 1 }
+}
+
+/// Encoder window (1500 frames = 30 s) just large enough for the longest chunk. Whisper
+/// otherwise encodes a full 30 s for every chunk; matching the window to 12-second chunks
+/// was 22% faster with equal or better accuracy in CaptionNest's Bangla test.
+pub fn audio_ctx_for(max_chunk_ms: i64) -> Option<u32> {
+    if max_chunk_ms >= 28_000 {
+        return None;
+    }
+    let frames = ((max_chunk_ms.max(1_000) as f64 / 30_000.0) * 1500.0 / 64.0).ceil() as u32 * 64 + 64;
+    Some(frames.min(1500))
+}
+
 /// Recognizes the given spans of `wav` (each at most ~30 s), returning words on the
 /// original timeline. Each span is decoded on its own, so a misrecognition can't spread
 /// across a long video, and no stretch of speech is skipped by the decoder jumping
@@ -55,7 +73,7 @@ pub async fn transcribe_spans(
     work_dir: &Path,
     opts: &Options,
     cancel: &CancellationToken,
-    mut on_progress: impl FnMut(f32),
+    on_progress: impl FnMut(f32) + Send,
 ) -> AppResult<Transcript> {
     if !opts.model.is_file() {
         return Err(AppError::new(ErrorCode::ModelMissing, "The speech recognition model isn't installed yet."));
@@ -63,6 +81,58 @@ pub async fn transcribe_spans(
     std::fs::create_dir_all(work_dir)?;
     let info = wav::read_info(wav).map_err(|e| AppError::new(ErrorCode::ToolFailed, "The prepared audio couldn't be read.").with_detail(e.to_string()))?;
     let total: i64 = spans.iter().map(|(s, e)| (e - s).max(1)).sum::<i64>().max(1);
+
+    // Contiguous groups, one recognizer process each.
+    let n = if spans.len() >= 8 { parallel_processes(opts.use_gpu) } else { 1 };
+    let groups: Vec<&[(i64, i64)]> = spans.chunks(spans.len().div_ceil(n).max(1)).collect();
+    let mut gopts = opts.clone();
+    gopts.threads = (opts.threads / groups.len()).max(2);
+
+    let done = std::sync::Mutex::new(vec![0i64; groups.len()]);
+    let on_progress = std::sync::Mutex::new(on_progress);
+    let report = |g: usize, ms: i64| {
+        let sum: i64 = {
+            let mut d = done.lock().unwrap();
+            d[g] = ms;
+            d.iter().sum()
+        };
+        (on_progress.lock().unwrap())((sum as f64 / total as f64).clamp(0.0, 1.0) as f32);
+    };
+    let report = &report;
+    let runs = groups.iter().enumerate().map(|(g, group)| {
+        let dir = work_dir.join(format!("g{g}"));
+        let gopts = &gopts;
+        let info = &info;
+        async move { run_group(whisper_cli, wav, info, group, &dir, gopts, cancel, move |ms| report(g, ms)).await }
+    });
+    let results = futures_util::future::try_join_all(runs).await?;
+
+    let mut out = Transcript { words: Vec::new(), language: opts.language.clone(), used_gpu: opts.use_gpu, repaired_text: false };
+    for t in results {
+        out.used_gpu &= t.used_gpu;
+        out.repaired_text |= t.repaired_text;
+        if out.language.is_none() {
+            out.language = t.language;
+        }
+        out.words.extend(t.words);
+    }
+    out.words.sort_by_key(|w| w.start_ms);
+    (on_progress.lock().unwrap())(1.0);
+    Ok(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_group(
+    whisper_cli: &Path,
+    wav: &Path,
+    info: &wav::WavInfo,
+    spans: &[(i64, i64)],
+    work_dir: &Path,
+    opts: &Options,
+    cancel: &CancellationToken,
+    report: impl Fn(i64),
+) -> AppResult<Transcript> {
+    std::fs::create_dir_all(work_dir)?;
     let mut done_ms = 0i64;
     let mut use_gpu = opts.use_gpu;
     let mut out = Transcript { words: Vec::new(), language: opts.language.clone(), used_gpu: use_gpu, repaired_text: false };
@@ -70,23 +140,18 @@ pub async fn transcribe_spans(
     for (batch_no, batch) in spans.chunks(BATCH).enumerate() {
         let names: Vec<String> = (0..batch.len()).map(|i| format!("c{:03}-{:05}.wav", batch_no, i)).collect();
         for (name, &(s, e)) in names.iter().zip(batch) {
-            wav::write_slice(wav, &info, s, e, &work_dir.join(name))?;
+            wav::write_slice(wav, info, s, e, &work_dir.join(name))?;
         }
         let durations: Vec<i64> = batch.iter().map(|(s, e)| (e - s).max(1)).collect();
-        let result = run_batch(whisper_cli, work_dir, &names, &durations, opts, use_gpu, cancel, |p| {
-            on_progress(((done_ms as f64 + p as f64) / total as f64).clamp(0.0, 1.0) as f32)
-        })
-        .await;
+        let audio_ctx = audio_ctx_for(durations.iter().copied().max().unwrap_or(30_000));
+        let result = run_batch(whisper_cli, work_dir, &names, &durations, opts, audio_ctx, use_gpu, cancel, |p| report(done_ms + p)).await;
         match result {
             Ok(()) => {}
             Err(e) if use_gpu && !e.is_cancelled() && e.code != ErrorCode::DiskFull => {
                 log::warn!("whisper GPU run failed, continuing on the processor: {e:?}");
                 use_gpu = false;
                 out.used_gpu = false;
-                run_batch(whisper_cli, work_dir, &names, &durations, opts, false, cancel, |p| {
-                    on_progress(((done_ms as f64 + p as f64) / total as f64).clamp(0.0, 1.0) as f32)
-                })
-                .await?;
+                run_batch(whisper_cli, work_dir, &names, &durations, opts, audio_ctx, false, cancel, |p| report(done_ms + p)).await?;
             }
             Err(e) => return Err(e),
         }
@@ -108,9 +173,8 @@ pub async fn transcribe_spans(
             let _ = std::fs::remove_file(work_dir.join(name));
         }
         done_ms += durations.iter().sum::<i64>();
+        report(done_ms);
     }
-    out.words.sort_by_key(|w| w.start_ms);
-    on_progress(1.0);
     Ok(out)
 }
 
@@ -121,6 +185,7 @@ async fn run_batch(
     names: &[String],
     durations: &[i64],
     opts: &Options,
+    audio_ctx: Option<u32>,
     use_gpu: bool,
     cancel: &CancellationToken,
     mut on_progress: impl FnMut(i64),
@@ -140,6 +205,9 @@ async fn run_batch(
     }
     if let Some(p) = &opts.prompt {
         cmd.arg("--prompt").arg(p);
+    }
+    if let Some(ac) = audio_ctx {
+        cmd.args(["-ac", &ac.to_string()]);
     }
     if !use_gpu {
         cmd.arg("-ng");
@@ -368,6 +436,14 @@ mod tests {
         let (l, p) = parse_detection("whisper_full_with_state: auto-detected language: gu (p = 0.210000)").unwrap();
         assert_eq!(l, "gu");
         assert!((p - 0.21).abs() < 1e-6);
+    }
+
+    #[test]
+    fn audio_window_fits_the_longest_chunk() {
+        assert_eq!(audio_ctx_for(12_500), Some(704));
+        assert!(audio_ctx_for(13_600).unwrap() >= 13_600 * 1500 / 30_000);
+        assert_eq!(audio_ctx_for(29_000), None);
+        assert!(audio_ctx_for(100).unwrap() >= 64);
     }
 
     #[test]

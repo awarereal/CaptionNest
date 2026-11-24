@@ -22,7 +22,7 @@ import { CueList } from "../components/CueList";
 import { Button, IconButton } from "../components/ui";
 import { canRedo, canUndo } from "../lib/history";
 import { languageName } from "../lib/languages";
-import { overlappingIds, sortCues } from "../lib/cueOps";
+import { overlappingIds, sortCues, wordsToCheck } from "../lib/cueOps";
 import { parseOffsetSeconds } from "../lib/time";
 import { api, toAppError } from "../lib/api";
 import { confirmDiscard, pickOpen, saveProject } from "../lib/fileFlows";
@@ -354,7 +354,8 @@ function StatusBar() {
     const overlaps = overlappingIds(cues);
     const empty = cues.filter((c) => !c.text.trim());
     const invalid = cues.filter((c) => c.endMs <= c.startMs);
-    return { count: cues.length, overlaps, empty, invalid, cues };
+    const toCheck = cues.filter((c) => wordsToCheck(c).length > 0);
+    return { count: cues.length, overlaps, empty, invalid, cues, toCheck };
   }, [track]);
   if (!track) return null;
   const firstOverlap = stats.cues.find((c) => stats.overlaps.has(c.id));
@@ -386,7 +387,26 @@ function StatusBar() {
           </button>
         </>
       )}
-      {stats.overlaps.size === 0 && problems.length === 0 && stats.count > 0 && <span className="statusbar__ok">Ready to export</span>}
+      {stats.toCheck.length > 0 && (
+        <>
+          <span className="statusbar__dot" />
+          <button
+            className="statusbar__check"
+            onClick={() => {
+              const now = usePlayhead.getState().ms;
+              const next = stats.toCheck.find((c) => c.startMs > now + 50) ?? stats.toCheck[0];
+              select(next.id);
+              usePlayhead.getState().seek(next.startMs);
+            }}
+            title="Jump to the next caption with words to check"
+          >
+            {stats.toCheck.length} to check · next
+          </button>
+        </>
+      )}
+      {stats.overlaps.size === 0 && problems.length === 0 && stats.toCheck.length === 0 && stats.count > 0 && (
+        <span className="statusbar__ok">Ready to export</span>
+      )}
     </footer>
   );
 }

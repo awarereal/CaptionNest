@@ -1,9 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Play, Scissors, ArrowsMergeIcon, Trash, WarningCircle } from "@phosphor-icons/react";
+import { Play, Scissors, ArrowsMergeIcon, Trash, WarningCircle, Eye, Check } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
-import { activeIndex, overlappingIds, sortCues } from "../lib/cueOps";
+import { activeIndex, overlappingIds, sortCues, wordsToCheck } from "../lib/cueOps";
 import { formatSeconds } from "../lib/time";
 import { isRtl } from "../lib/languages";
 import type { Cue } from "../lib/types";
@@ -115,7 +115,17 @@ const CueRow = memo(function CueRow({
   const split = useStore((s) => s.splitCue);
   const merge = useStore((s) => s.mergeCue);
   const remove = useStore((s) => s.deleteCue);
+  const markChecked = useStore((s) => s.markChecked);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const toCheck = wordsToCheck(cue);
+  const selectWord = (w: string) => {
+    const el = textRef.current;
+    if (!el) return;
+    const at = el.value.indexOf(w);
+    if (at < 0) return;
+    el.focus();
+    el.setSelectionRange(at, at + w.length);
+  };
   const duration = cue.endMs - cue.startMs;
   const invalid = duration <= 0;
   const empty = !cue.text.trim();
@@ -133,7 +143,7 @@ const CueRow = memo(function CueRow({
     if (ms < cue.startMs || ms >= cue.endMs) seek(cue.startMs);
   };
 
-  const cls = ["cue", active && "is-active", selected && "is-selected", overlap && "is-overlap", (empty || invalid) && "is-problem"]
+  const cls = ["cue", active && "is-active", selected && "is-selected", overlap && "is-overlap", (empty || invalid) && "is-problem", toCheck.length > 0 && "has-check"]
     .filter(Boolean)
     .join(" ");
 
@@ -182,6 +192,21 @@ const CueRow = memo(function CueRow({
             }
           }}
         />
+        {toCheck.length > 0 && (
+          <div className="cue__check" role="group" aria-label="Words to check">
+            <span className="cue__check-label">
+              <Eye size={13} /> Check
+            </span>
+            {toCheck.map((w) => (
+              <button key={w} className="cue__word caption-text" lang={language} onClick={() => selectWord(w)} title="Select this word">
+                {w}
+              </button>
+            ))}
+            <button className="cue__ok" onClick={() => markChecked(cue.id)}>
+              <Check size={13} weight="bold" /> Looks right
+            </button>
+          </div>
+        )}
       </div>
       <div className="cue__actions">
         <IconButton label="Play from here" size="sm" side="top" onClick={() => {

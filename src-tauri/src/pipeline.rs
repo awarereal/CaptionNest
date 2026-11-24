@@ -33,6 +33,9 @@ pub struct GenerateRequest {
     pub translate_model_id: Option<String>,
     pub use_gpu: bool,
     pub max_line_chars: Option<usize>,
+    /// Use a language-specialised model (e.g. Bangla) when one is installed. Default on.
+    #[serde(default)]
+    pub use_language_models: Option<bool>,
     /// Testing only: use this model file instead of a catalog model.
     #[serde(default)]
     pub model_path_override: Option<String>,
@@ -46,6 +49,9 @@ pub struct GenerateResult {
     pub detected_language: Option<String>,
     pub used_gpu: bool,
     pub warnings: Vec<String>,
+    /// The language-specialised model used, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_used: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,7 +136,18 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
             opts.language = Some(lang);
         }
     }
-    opts.prompt = opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string);
+    // A model trained for this language (e.g. Bangla) spells it far better than the
+    // general model; use it when installed and allowed.
+    let mut specialised = None;
+    if req.use_language_models.unwrap_or(true) && req.model_path_override.is_none() {
+        if let Some(lang) = opts.language.as_deref() {
+            if let Some(m) = catalog::language_models(lang).find(|m| models::whisper_installed(paths, m)) {
+                opts.model = models::whisper_path(paths, m);
+                specialised = Some(m.id.clone());
+            }
+        }
+    }
+    opts.prompt = if specialised.is_some() { None } else { opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string) };
     let ctx = Ctx { speech, ..ctx };
     let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
     let mut warnings: Vec<String> = uncertain.into_iter().collect();
@@ -175,7 +192,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     }
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
-    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(language), used_gpu: t.used_gpu, warnings })
+    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(language), used_gpu: t.used_gpu, warnings, model_used: specialised })
 }
 
 /// Adds a caption language to an existing project.
@@ -205,7 +222,7 @@ pub async fn translate_existing(paths: &Paths, req: TranslateRequest, job_id: &s
     let (tracks, used_gpu) = translate_track(&ctx, &wav, &req.source_track, &req.target_language, "", req.translate_model_id.as_deref(), req.use_gpu, req.duration_ms).await?;
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
-    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(source_lang), used_gpu, warnings: vec![] })
+    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(source_lang), used_gpu, warnings: vec![], model_used: None })
 }
 
 /// Runs the recognizer over the speech, then re-checks any stretch of speech that came
@@ -459,11 +476,11 @@ fn installed_whisper(paths: &Paths, id: &str) -> AppResult<PathBuf> {
 /// The model used for speech-to-English: the chosen translation model, or the
 /// transcription model if it supports translation, or any installed capable model.
 fn translation_model(paths: &Paths, transcribe_id: &str, translate_id: Option<&str>) -> AppResult<PathBuf> {
-    let capable = |id: &str| catalog::whisper_model(id).filter(|m| m.can_translate && models::whisper_installed(paths, m));
+    let capable = |id: &str| catalog::whisper_model(id).filter(|m| m.can_translate && m.language.is_none() && models::whisper_installed(paths, m));
     let chosen = translate_id
         .and_then(capable)
         .or_else(|| capable(transcribe_id))
-        .or_else(|| catalog::whisper().models.iter().find(|m| m.can_translate && models::whisper_installed(paths, m)));
+        .or_else(|| catalog::whisper().models.iter().find(|m| m.can_translate && m.language.is_none() && models::whisper_installed(paths, m)));
     match chosen {
         Some(m) => Ok(models::whisper_path(paths, m)),
         None => Err(AppError::new(
