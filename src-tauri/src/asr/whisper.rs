@@ -19,6 +19,8 @@ pub struct Options {
     pub use_gpu: bool,
     pub vad_model: Option<PathBuf>,
     pub threads: usize,
+    /// Initial prompt (see `prompt.rs`).
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +89,9 @@ async fn run_once(
         cmd.arg("--vad").arg("-vm").arg(vad)
             .args(["-vt", "0.5", "-vspd", "250", "-vsd", "300", "-vp", "200"]);
     }
+    if let Some(p) = &opts.prompt {
+        cmd.arg("--prompt").arg(p);
+    }
     if !use_gpu {
         cmd.arg("-ng");
     }
@@ -133,10 +138,56 @@ async fn run_once(
     Ok(t)
 }
 
+/// Detects the spoken language from the first 30 seconds of speech (one encoder pass).
+/// Returns the language and Whisper's probability, or None when detection failed (the
+/// main pass then detects on its own).
+pub async fn detect_language(
+    whisper_cli: &Path,
+    wav: &Path,
+    opts: &Options,
+    cancel: &CancellationToken,
+) -> AppResult<Option<(String, f32)>> {
+    let run = |gpu: bool| {
+        let mut cmd = process::command(whisper_cli);
+        cmd.arg("-m").arg(&opts.model).arg("-f").arg(wav).args(["-dl", "-l", "auto"])
+            .args(["-t", &opts.threads.to_string()]);
+        if let Some(vad) = &opts.vad_model {
+            cmd.arg("--vad").arg("-vm").arg(vad);
+        }
+        if !gpu {
+            cmd.arg("-ng");
+        }
+        cmd
+    };
+    let mut found = None;
+    let out = process::run_streaming(run(opts.use_gpu), cancel, false, |_| {}, |l| {
+        if let Some(d) = parse_detection(l) {
+            found = Some(d);
+        }
+    })
+    .await?;
+    if found.is_none() && !out.status.success() && opts.use_gpu {
+        process::run_streaming(run(false), cancel, false, |_| {}, |l| {
+            if let Some(d) = parse_detection(l) {
+                found = Some(d);
+            }
+        })
+        .await?;
+    }
+    Ok(found)
+}
+
 fn parse_progress(line: &str) -> Option<f32> {
     let rest = line.split("progress =").nth(1)?;
     let n: f32 = rest.trim().trim_end_matches('%').trim().parse().ok()?;
     Some((n / 100.0).clamp(0.0, 1.0))
+}
+
+/// "auto-detected language: bn (p = 0.912)" → ("bn", 0.912)
+fn parse_detection(line: &str) -> Option<(String, f32)> {
+    let lang = parse_detected_language(line)?;
+    let p = line.split("p =").nth(1).and_then(|r| r.trim().trim_end_matches(')').trim().parse().ok()).unwrap_or(0.0);
+    Some((lang, p))
 }
 
 fn parse_detected_language(line: &str) -> Option<String> {
@@ -233,6 +284,9 @@ mod tests {
         assert_eq!(parse_progress("whisper_print_progress_callback: progress = 100%"), Some(1.0));
         assert_eq!(parse_progress("unrelated"), None);
         assert_eq!(parse_detected_language("whisper_full_with_state: auto-detected language: bn (p = 0.912)").as_deref(), Some("bn"));
+        let (l, p) = parse_detection("whisper_full_with_state: auto-detected language: gu (p = 0.210000)").unwrap();
+        assert_eq!(l, "gu");
+        assert!((p - 0.21).abs() < 1e-6);
     }
 
     #[test]

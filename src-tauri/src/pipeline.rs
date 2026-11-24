@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{segment, whisper};
+use crate::asr::{prompt, script, segment, whisper};
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -15,6 +15,9 @@ use crate::models::{self, catalog};
 use crate::paths::Paths;
 use crate::project::{Track, TrackKind};
 use crate::translate::{argos::PackageTranslator, routes};
+
+/// Model used for automatic language detection when installed.
+const DETECTION_MODEL: &str = "large-v3-q5_0";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -89,20 +92,38 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
 
     let wav = extract_wav(&ctx, &video, req.audio_stream_index, req.duration_ms).await?;
 
-    report.stage("transcribing", Some(0.0), None);
-    let opts = whisper::Options {
+    report.stage("transcribing", None, Some("detecting".into()));
+    let mut opts = whisper::Options {
         model: transcribe_model,
         language: spoken.clone(),
         translate: false,
         use_gpu: req.use_gpu,
         vad_model: paths.vad_model(),
         threads: whisper::default_threads(),
+        prompt: None,
     };
-    let t = whisper::transcribe(&paths.tool("whisper-cli")?, &wav, &scratch.path().join("transcript"), &opts, cancel, |p| {
+    let mut uncertain = None;
+    if opts.language.is_none() {
+        // The Accurate model identifies languages far more reliably (on real Bangla speech
+        // it was right 20 of 20 times; the Fast model 3 of 20), so it detects when present.
+        let mut detect_opts = opts.clone();
+        if let Some(m) = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m)) {
+            detect_opts.model = models::whisper_path(paths, m);
+        }
+        if let Some((lang, p)) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, cancel).await? {
+            if p < 0.5 {
+                uncertain = Some(format!("language_uncertain:{lang}:{p:.2}"));
+            }
+            opts.language = Some(lang);
+        }
+    }
+    opts.prompt = opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string);
+    report.stage("transcribing", Some(0.0), None);
+    let mut t = whisper::transcribe(&paths.tool("whisper-cli")?, &wav, &scratch.path().join("transcript"), &opts, cancel, |p| {
         report.stage("transcribing", Some(p), None)
     })
     .await?;
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = uncertain.into_iter().collect();
     if req.use_gpu && !t.used_gpu {
         warnings.push("gpu_fallback".to_string());
     }
@@ -110,6 +131,11 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         warnings.push("text_repaired".to_string());
     }
     let language = t.language.clone().or(spoken.clone()).unwrap_or_else(|| "und".into());
+    if script::uses_bengali_script(&language) {
+        for w in &mut t.words {
+            w.text = script::devanagari_to_bengali(&w.text);
+        }
+    }
     let cues = segment::segment(&t.words, &ctx.seg, Some(req.duration_ms));
     if cues.is_empty() {
         return Err(AppError::new(
@@ -237,6 +263,7 @@ async fn whisper_english(
         use_gpu,
         vad_model: ctx.paths.vad_model(),
         threads: whisper::default_threads(),
+        prompt: prompt::initial_prompt("en").map(str::to_string),
     };
     let t = whisper::transcribe(&ctx.paths.tool("whisper-cli")?, wav, &ctx.scratch.path().join("english"), &opts, ctx.cancel, |p| {
         ctx.report.stage("translating", Some(p), Some("whisper".into()))

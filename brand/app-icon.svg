@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2C261E"/>
+      <stop offset="0.55" stop-color="#1C1813"/>
+      <stop offset="1" stop-color="#14110D"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="512" cy="455" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F2BD4B" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F2BD4B" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="egg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#FCE29A"/>
+      <stop offset="0.5" stop-color="#F2BD4B"/>
+      <stop offset="1" stop-color="#D9952C"/>
+    </linearGradient>
+    <linearGradient id="strand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6EFDF"/>
+      <stop offset="1" stop-color="#D9CDB5"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF4DC" stop-opacity="0.16"/>
+      <stop offset="0.4" stop-color="#FFF4DC" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tile (macOS icon grid: 824px body, 100px margin) -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="184.5" fill="none" stroke="url(#rim)" stroke-width="3"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+
+  <g transform="translate(0 -30)">
+  <!-- egg: the voice the nest holds -->
+  <path d="M512 318
+           C 566 318, 606 392, 606 462
+           C 606 522, 564 560, 512 560
+           C 460 560, 418 522, 418 462
+           C 418 392, 458 318, 512 318 Z"
+        fill="url(#egg)"/>
+  <path d="M478 360 C 466 384, 458 410, 456 436" fill="none" stroke="#FFF6D8" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- nest: three caption lines, slightly crossed like woven strands -->
+  <g fill="none" stroke-linecap="round">
+    <!-- a slim cut where the top strand passes in front of the egg -->
+    <path d="M268 498 Q 510 650 760 512" stroke="#1E1A14" stroke-width="70"/>
+    <path d="M268 498 Q 510 650 760 512" stroke="url(#strand)" stroke-width="50"/>
+    <path d="M318 616 Q 506 722 708 600" stroke="url(#strand)" stroke-width="50" stroke-opacity="0.8"/>
+    <path d="M396 708 Q 516 776 630 714" stroke="url(#strand)" stroke-width="50" stroke-opacity="0.6"/>
+  </g>
+  </g>
+</svg>

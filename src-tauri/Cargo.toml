@@ -45,6 +45,15 @@ sentencepiece = { version = "0.14.0", features = ["static"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ct2rs = { version = "0.11.3", default-features = false, features = ["ruy", "accelerate"] }
+# Only for the test-automation feature (web view snapshots).
+objc2-web-kit = { version = "0.3.2", optional = true, features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }
+objc2-app-kit = { version = "0.3.2", optional = true, features = ["NSImage", "NSBitmapImageRep", "NSImageRep"] }
+objc2-foundation = { version = "0.3.2", optional = true, features = ["NSData", "NSDictionary", "NSError"] }
+block2 = { version = "0.6.2", optional = true }
+
+[features]
+# Test-only bridge that lets scripts drive the UI and take snapshots. Never enabled in releases.
+automation = ["dep:objc2-web-kit", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:block2"]
 
 [dev-dependencies]
 httpmock = "0.9.0"

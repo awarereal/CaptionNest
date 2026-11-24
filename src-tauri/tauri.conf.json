@@ -23,8 +23,9 @@
         "resizable": true,
         "maximizable": true,
         "minimizable": true,
-        "backgroundColor": "#0D0E10",
-        "dragDropEnabled": true
+        "backgroundColor": "#14110E",
+        "dragDropEnabled": true,
+        "theme": "Dark"
       }
     ],
     "security": {
@@ -66,13 +67,24 @@
       "minimumSystemVersion": "13.3",
       "signingIdentity": "-",
       "dmg": {
-        "windowSize": { "width": 640, "height": 400 },
-        "appPosition": { "x": 180, "y": 190 },
-        "applicationFolderPosition": { "x": 460, "y": 190 }
+        "windowSize": {
+          "width": 640,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 190
+        },
+        "applicationFolderPosition": {
+          "x": 460,
+          "y": 190
+        }
       }
     },
     "windows": {
-      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": false

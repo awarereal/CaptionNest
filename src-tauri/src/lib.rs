@@ -1,6 +1,8 @@
 //! CaptionNest desktop app: Tauri commands and app setup.
 
 mod asr;
+#[cfg(feature = "automation")]
+mod automation;
 mod captions;
 mod error;
 mod jobs;
@@ -449,6 +451,8 @@ pub fn run() {
         .setup(move |app| {
             let paths = Paths::resolve(app.handle())?;
             jobs::sweep_abandoned(&paths.jobs);
+            #[cfg(feature = "automation")]
+            automation::start(app.handle());
             let settings = settings::load(&paths.config);
             app.manage(AppState {
                 paths,
