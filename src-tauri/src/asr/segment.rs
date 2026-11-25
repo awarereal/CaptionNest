@@ -22,11 +22,14 @@ pub struct Options {
     pub max_gap_ms: i64,
     /// Extra time a cue stays on screen after the last word, if the next cue allows.
     pub linger_ms: i64,
+    /// Speech regions (unpadded VAD), used to put caption edges exactly where speech
+    /// starts and stops. Empty = word times only.
+    pub speech: Vec<(i64, i64)>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 250 }
+        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 150, speech: Vec::new() }
     }
 }
 
@@ -71,8 +74,49 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
             cue
         })
         .collect();
+    let inner: Vec<Inner> = groups
+        .iter()
+        .map(|g| Inner { second_start: g.get(1).map(|w| w.start_ms), last_start: g[g.len() - 1].start_ms })
+        .collect();
+    align_to_speech(&mut cues, &inner, &opts.speech);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
+}
+
+/// Word starts inside a cue, which its edges must not cross when snapped.
+struct Inner {
+    second_start: Option<i64>,
+    last_start: i64,
+}
+
+/// Moves each caption edge to the nearest real speech onset or offset close by, so a
+/// caption appears when the voice starts and leaves when it stops. Edges inside
+/// continuous speech (no onset/offset nearby) keep their word times.
+fn align_to_speech(cues: &mut [Cue], inner: &[Inner], speech: &[(i64, i64)]) {
+    if speech.is_empty() || cues.is_empty() {
+        return;
+    }
+    let onsets: Vec<i64> = speech.iter().map(|s| s.0).collect();
+    let offsets: Vec<i64> = speech.iter().map(|s| s.1).collect();
+    let nearest = |points: &[i64], at: i64, lo: i64, hi: i64| -> Option<i64> {
+        points.iter().copied().filter(|&p| p >= lo && p <= hi).min_by_key(|&p| (p - at).abs())
+    };
+    let raw: Vec<(i64, i64)> = cues.iter().map(|c| (c.start_ms, c.end_ms)).collect();
+    let mut prev_end = i64::MIN;
+    for i in 0..cues.len() {
+        let (a, b) = raw[i];
+        let hi = inner.get(i).and_then(|w| w.second_start).map_or(a + 400, |s| (a + 400).min(s - 100));
+        if let Some(o) = nearest(&onsets, a, a - 600, hi).filter(|&o| o >= prev_end) {
+            cues[i].start_ms = o;
+        }
+        let next_start = raw.get(i + 1).map_or(i64::MAX, |r| r.0);
+        let last_start = inner.get(i).map_or(a, |w| w.last_start);
+        let lo = (b - 900).max(last_start + 150).max(cues[i].start_ms + 200);
+        if let Some(f) = nearest(&offsets, b, lo, (b + 600).min(next_start)) {
+            cues[i].end_ms = f;
+        }
+        prev_end = cues[i].end_ms;
+    }
 }
 
 /// When a long sentence spills over, the greedy split can leave a lonely last word
@@ -230,6 +274,8 @@ pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64
             at = end;
         }
     }
+    let inner: Vec<Inner> = cues.iter().map(|c| Inner { second_start: None, last_start: c.start_ms }).collect();
+    align_to_speech(&mut cues, &inner, &opts.speech);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
 }
@@ -367,7 +413,7 @@ mod tests {
         assert_eq!(cues.len(), 1);
         assert_eq!(cues[0].text, "Hello there.");
         assert_eq!(cues[0].start_ms, 0);
-        assert_eq!(cues[0].end_ms, 950);
+        assert_eq!(cues[0].end_ms, 700 + Options::default().linger_ms);
     }
 
     #[test]
@@ -509,6 +555,38 @@ mod tests {
         assert!(cues.iter().all(|c| graphemes(&c.text) >= 14), "{cues:?}");
         let joined: String = cues.iter().map(|c| c.text.replace('\n', " ")).collect::<Vec<_>>().join(" ");
         assert!(joined.ends_with("বাঁচানো হয়।"));
+    }
+
+    #[test]
+    fn caption_edges_follow_speech_onset_and_offset() {
+        // Whisper put the sentence at 330-7240; speech is really 700-6620, then 10370-...
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: format!(" {t}") };
+        let words = vec![w(330, 1200, "এটিকে"), w(1200, 3000, "মঙ্গলবার"), w(3000, 6200, "হয়।"), w(10_000, 11_000, "চক্রন্ত"), w(11_000, 12_500, "বিশ্লেষণ।")];
+        let opts = Options { speech: vec![(700, 6_620), (10_370, 12_300)], ..Default::default() };
+        let cues = segment(&words, &opts, None);
+        assert_eq!(cues.len(), 2);
+        assert_eq!((cues[0].start_ms, cues[0].end_ms), (700, 6_620 + opts.linger_ms));
+        assert_eq!((cues[1].start_ms, cues[1].end_ms), (10_370, 12_300 + opts.linger_ms));
+    }
+
+    #[test]
+    fn snapping_never_cuts_off_the_last_word() {
+        // A pause offset before the last word starts must not end the caption.
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: format!(" {t}") };
+        let words = vec![w(1_000, 1_500, "one"), w(1_500, 2_000, "two"), w(2_300, 2_900, "three.")];
+        let opts = Options { speech: vec![(1_000, 2_050), (2_300, 4_500)], ..Default::default() };
+        let cues = segment(&words, &opts, None);
+        assert_eq!(cues.len(), 1);
+        assert!(cues[0].end_ms >= 2_900, "{cues:?}");
+    }
+
+    #[test]
+    fn edges_inside_continuous_speech_keep_word_times() {
+        let words = varied(0, 20, 400);
+        let opts = Options { max_duration_ms: 4_000, speech: vec![(0, 8_000)], ..Default::default() };
+        let cues = segment(&words, &opts, None);
+        assert!(cues.len() >= 2);
+        assert!(cues.iter().skip(1).all(|c| c.start_ms % 400 == 0), "{cues:?}");
     }
 
     #[test]

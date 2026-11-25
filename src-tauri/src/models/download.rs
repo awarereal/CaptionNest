@@ -31,6 +31,9 @@ pub fn client() -> reqwest::Client {
         .user_agent(concat!("CaptionNest/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
         .read_timeout(Duration::from_secs(60))
+        // Don't keep idle connections open after a download: CaptionNest uses the
+        // network only while downloading.
+        .pool_max_idle_per_host(0)
         .build()
         .expect("http client")
 }

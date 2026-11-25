@@ -49,12 +49,19 @@ computer:
 
 | Model | Download | Good for |
 |---|---|---|
-| **Accurate** | 1.1 GB | Best accuracy, including Bangla. Also makes English captions from other languages. Fastest on Apple-chip Macs. |
+| **Accurate** | 1.1 GB | Best accuracy for most languages. Also makes English captions from other languages. |
 | **Fast** | 574 MB | About four times faster, nearly as accurate. Recommended on Windows and Intel Macs. |
 | **Light** | 488 MB | Older computers, clear English only. |
+| **Bangla Max** | 1.1 GB | Bangla speech: the best Bangla spelling. Recommended on Apple-chip Macs. |
+| **Bangla** | 574 MB | Bangla speech: nearly as good, about four times faster. Recommended on Windows and Intel Macs. |
 
-- Downloads come from Hugging Face (huggingface.co). Optional translation language packs
-  come from Argos Translate (argos-net.com). Every file is checked before it's used.
+**Making Bangla captions?** Also download a Bangla model. CaptionNest then uses it
+automatically whenever the speech is Bangla. It makes about half as many spelling
+mistakes as the general models.
+
+- Downloads come from Hugging Face (huggingface.co) and, for the Bangla models, from
+  CaptionNest's GitHub release page. Optional translation language packs come from Argos
+  Translate (argos-net.com). Every file is checked before it's used.
 - A paused or interrupted download continues where it stopped.
 - After this, CaptionNest works **without internet**.
 
@@ -84,6 +91,9 @@ computer:
 - **Add caption** inserts one at the current position. **Shift timing** moves every
   caption earlier or later.
 - **Undo / Redo**: Ctrl+Z / Ctrl+Shift+Z (⌘ on Mac).
+- Words the speech model wasn't sure about appear as **Check** chips under the caption.
+  Listen, fix the word if needed, then click **Looks right**. The status bar counts what
+  is left to check; click **next** to jump to it.
 - If some speech couldn't be recognized, CaptionNest keeps it as an **empty caption**
   so nothing is missed: listen and type the words, or delete it.
 - **Save** keeps your work as a `.captionnest` project. If you move the video later,
@@ -93,7 +103,7 @@ computer:
 
 Speech recognition is very good but not perfect, especially with background music,
 several people talking at once, or strong accents. Bangla captions are a strong first
-draft that needs a careful read-through.
+draft: go through the **Check** words before you export.
 
 ---
 

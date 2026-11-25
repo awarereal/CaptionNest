@@ -154,7 +154,9 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     } else {
         opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string)
     };
-    let ctx = Ctx { speech, ..ctx };
+    let mut seg = ctx.seg.clone();
+    seg.speech = vad::unpadded(&speech);
+    let ctx = Ctx { speech, seg, ..ctx };
     let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
     let mut warnings: Vec<String> = uncertain.into_iter().collect();
     if req.use_gpu && !t.used_gpu {
@@ -399,10 +401,12 @@ async fn whisper_english(
     };
     // Re-use speech regions from this job, or find them (adding a language later).
     let speech = if ctx.speech.is_empty() { find_speech(ctx, wav).await.unwrap_or_default() } else { ctx.speech.clone() };
-    let sub = Ctx { paths: ctx.paths, cancel: ctx.cancel, report: ctx.report, scratch: ctx.scratch, seg: ctx.seg.clone(), speech };
+    let mut seg = ctx.seg.clone();
+    seg.speech = vad::unpadded(&speech);
+    let sub = Ctx { paths: ctx.paths, cancel: ctx.cancel, report: ctx.report, scratch: ctx.scratch, seg, speech };
     let (t, _) = recognize(&sub, wav, &opts, duration_ms).await?;
     let sentences = t.words.clone();
-    let cues = segment::from_segments(&sentences, &ctx.seg, Some(duration_ms));
+    let cues = segment::from_segments(&sentences, &sub.seg, Some(duration_ms));
     if cues.is_empty() {
         return Err(AppError::new(ErrorCode::TranslationFailed, "The English translation came out empty."));
     }

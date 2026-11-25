@@ -20,11 +20,26 @@ use crate::media::process;
 /// Speech regions in milliseconds on the original timeline.
 pub type Segments = Vec<(i64, i64)>;
 
+/// Padding the VAD adds on each side of a speech region (`-vp`).
+pub const PAD_MS: i64 = 120;
+
+/// Where speech really starts and stops: the regions without their padding.
+pub fn unpadded(speech: &[(i64, i64)]) -> Segments {
+    speech
+        .iter()
+        .map(|&(s, e)| {
+            let mid = (s + e) / 2;
+            let a = if s == 0 { 0 } else { (s + PAD_MS).min(mid) };
+            (a, (e - PAD_MS).max(mid).max(a))
+        })
+        .collect()
+}
+
 pub async fn speech_segments(tool: &Path, wav: &Path, model: &Path, threads: usize, cancel: &CancellationToken) -> AppResult<Segments> {
     let mut cmd = process::command(tool);
     cmd.arg("-f").arg(wav).arg("-vm").arg(model)
         .args(["-t", &threads.to_string(), "-np"])
-        .args(["-vt", "0.5", "-vspd", "200", "-vsd", "300", "-vp", "120", "-vmsd", "10"]);
+        .args(["-vt", "0.5", "-vspd", "200", "-vsd", "300", "-vp", &PAD_MS.to_string(), "-vmsd", "10"]);
     let mut segments = Vec::new();
     let out = process::run_streaming(cmd, cancel, false, |line| {
         if let Some(s) = parse_line(line) {

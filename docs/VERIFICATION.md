@@ -18,9 +18,23 @@ misspelled word as wrong, so it is the spelling measure; **CER** counts characte
 | Fast — OpenAI large-v3-turbo (q5_0), with script repair | 86.0% | 44.4% | 63% → 100% | 0.25 |
 | Light — OpenAI small | 110% | 104% | 0% | 0.18 |
 
+The same models inside the app pipeline (speech chunks, language prompt, segmenting),
+on 5 minutes of real FLEURS Bangla speech, 381 reference words:
+
+| Model in CaptionNest | WER | CER | Speed (× real time) |
+|---|---|---|---|
+| **Bangla Max** | **26.5%** | **11.7%** | 0.91 |
+| **Bangla** (with Bangla punctuation prompt) | 32.3% | 13.9% | 0.24 |
+| Accurate (stock large-v3) | 75.6% | 26.4% | — |
+
 Decisions that followed:
-- The Bangla-trained models halve spelling errors, so Bangla speech is transcribed with
-  them automatically when installed ("Bangla" recommended, "Bangla Max" optional).
+- The Bangla-trained models cut spelling errors by more than half, so Bangla speech is
+  transcribed with them automatically when one is installed. **Bangla Max** is
+  recommended on Apple-chip Macs (GPU makes it fast enough); **Bangla** on Windows and
+  Intel Macs. The punctuation prompt is used only where it measurably helps (Bangla).
+- Words the model was unsure of (confidence < 0.5) are listed under each caption as
+  **Check** chips, so a careful read-through finds the likely misspellings quickly.
+  No recognizer is 100% accurate; this is how the app gets you to 100% with review.
 - Small/Light can't write Bengali script at all; the app says so in the language picker.
 - Language detection uses the Accurate model: it identified real Bangla 20/20 times; the
   Fast model only 3/20 (it guessed Gujarati or Hindi). Detection votes across three
@@ -50,12 +64,15 @@ app UI (Accurate model, before the Bangla model existed):
 
 ## Automated tests
 
-- Rust: 97 unit tests (`cargo test --lib`) — SRT timestamps/serialization/parsing,
+- Rust: 98 unit tests (`cargo test --lib`) — SRT timestamps/serialization/parsing,
   export validation and overlap fixing, project save/load/relink/atomicity, WAV slicing,
   VAD parsing and chunk planning, coverage gaps, Whisper JSON parsing (incl. invalid
   UTF-8 from real output), word confidence, segmentation (Bangla fixture), Bengali script
   repair, prompt-echo filtering, language voting, translation routes, resumable verified
-  downloads (local HTTP server), job cancellation and scratch cleanup.
+  downloads (local HTTP server), job cancellation and scratch cleanup, balanced caption
+  breaks (no lonely last word), spacing after sentence marks.
+- Argos parity: CaptionNest's Rust translator gives the same English → Bangla output as
+  the reference Python `argostranslate` (ctranslate2 4.9.1) on the fixture sentences.
 - Frontend: 22 Vitest tests — cue editing (split/merge/add/delete/offset), undo history,
   timecode parsing.
 - CI (GitHub Actions) builds every platform from pinned sources, runs both test suites,
@@ -63,17 +80,58 @@ app UI (Accurate model, before the Bangla model existed):
 
 ## Real-app checks (driven through the interface)
 
-Performed on the macOS Apple Silicon development build via the automation bridge:
+Performed on macOS Apple Silicon through the app's normal screens, using a test-only
+automation bridge (`--features automation`, not in release builds) to click and read
+the UI. 18 of 18 pass:
 
 | Check | Result |
 |---|---|
-| English speech → English captions (path with spaces and Bengali characters) | pass — punctuated, sentence-split |
-| Bangla speech → Bangla captions | pass |
-| Bangla speech → English captions (auto-detected Bangla) | pass |
+| English speech → English captions, video path with spaces and Bengali characters | pass — punctuated, sentence-split |
+| Bangla speech → Bangla captions (Bangla model) | pass — 100% Bengali script, balanced captions |
+| Bangla speech → English captions (Bangla auto-detected) | pass |
+| Hindi → Hindi, Arabic → Arabic | pass — Arabic caption editor is right-to-left |
+| English captions → Add language → Bangla (Argos, offline) | pass — every caption keeps its exact timing |
+| Timing markers at 0.5 s / 30 s / 56 s | pass — 0.51 / 30.0 / 56.1 s |
+| Audio starting 2 s into the file; variable frame rate video | pass — 2.01 s; VFR detected, timing correct |
+| Choose 2nd audio track; make preview copy | pass |
+| Silence-only video | pass — "No speech found" with next steps |
+| Video without sound; damaged file | pass — explained, blocked |
+| Cancel, then start a new job | pass — no leftover scratch files |
+| Edit, split, merge, retime, undo/redo, shift timing | pass |
+| Save project, reopen; move the video and relink | pass |
+| Export SRT | pass — UTF-8 without BOM, CRLF, numbered |
+| Model download: stop at 147 MB, resume, SHA-256 verify | pass |
 | 30-minute video | pass (above) |
-| Language uncertainty warning, unrecognized-speech review captions | implemented, unit-tested |
+| No internet (all traffic routed to a dead proxy) | pass — English and Bangla→English captions made; a download fails within seconds: "Couldn't reach the download server…" |
+| Network watch while generating and translating | pass — 0 connections leave the computer |
+
+## CapCut import
+
+The Bangla SRT exported by CaptionNest was imported into **CapCut Desktop (macOS)** with
+*Captions → Add captions → Import file* on the original video. Reading the saved CapCut
+project: **8 of 8 captions became separate text clips, text identical** (Bengali intact),
+times within 0.053 s of the SRT (CapCut snaps to the project's 30 fps frames).
+
+## Packages
+
+| Platform | Built | Install / run check |
+|---|---|---|
+| macOS Apple Silicon | locally and in CI — `.dmg` 30 MB, app 68 MB, ad-hoc signed | CI mounts the dmg and runs the bundled pipeline (`--self-test`) on synthesized speech |
+| macOS Intel | in CI (native Intel runner) | same self-test |
+| Windows 10/11 x64 | in CI (NSIS installer) | CI installs silently and runs the self-test |
 
 ## Pending / limitations
 
-See the end of the delivery report for the up-to-date list; it is kept in sync with this
-file at release time.
+- **Not tested by hand on a clean Windows PC or a real Intel Mac.** CI builds, installs
+  and runs the full caption pipeline on both, but nobody has clicked through the UI there.
+- **Unsigned.** macOS shows the "can't verify the developer" step (Open Anyway, once);
+  Windows SmartScreen shows "More info → Run anyway". Signing needs an Apple Developer
+  account and a Windows code-signing certificate.
+- **Clean-Mac test (fresh user, quarantined download, Gatekeeper flow)** not run: no VM
+  was available on the test machine.
+- **macOS 13/14** not run (minimum supported is 13.3; built against that target).
+- **Accuracy.** Bangla with the Bangla models is a strong first draft (≈ 1 word in 4 needs
+  a fix on hard read speech, less on clear speech). Review the **Check** words before
+  export. Background music, overlapping speakers and strong accents lower accuracy.
+- **Translation quality** follows the Argos/OPUS-MT packs: readable, literal, sometimes
+  wrong on names and idioms. English → Bangla is direct; other pairs go through English.
