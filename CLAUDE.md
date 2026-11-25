@@ -51,11 +51,13 @@ Versions and SHA-256 hashes are in `scripts/tools/versions.env`. The Windows ste
 - `CAPTIONNEST_AUTOMATION_PORT=7788` together with `--features automation` turns on the UI automation bridge.
 - `CAPTIONNEST_ARGOS_ROOT=<installed package dir>` enables the ignored Argos reference test:
   `cargo test --lib matches_reference -- --ignored`.
-- `SARVAM_API_KEY` (environment or the gitignored `.env`) is used by `--self-test --online` and `scripts/dev/online_check.py`.
+- `SARVAM_API_KEY` (environment or the gitignored `.env`) is used by `--self-test --online` and `scripts/dev/online_check.py`;
+  `DEEPGRAM_API_KEY` adds Deepgram to `--self-test --online` (`--engine both|sarvam|deepgram`, as in Settings).
 - `CAPTIONNEST_DEBUG_DIR=<dir>` makes the pipeline write what it heard and where it put it
   (`online-timing.json`, `resync-heard.json`, `resync-regions.json`), for timing work.
   Measurement-only switches: `CAPTIONNEST_WORD_TIMING=0|sparse|all`,
-  `CAPTIONNEST_JOIN_PAUSE_MS`, `CAPTIONNEST_SYNC_MODE=greedy|beam[-dtw]`, `CAPTIONNEST_NO_AC`.
+  `CAPTIONNEST_JOIN_PAUSE_MS`, `CAPTIONNEST_SYNC_MODE=greedy|beam[-dtw]`, `CAPTIONNEST_NO_AC`,
+  `CAPTIONNEST_DG_SNAP_MS` (how far a Deepgram-timed caption start may move to a speech onset).
 - `DEEPGRAM_API_KEY` plus `CAPTIONNEST_VOICE_SAMPLES=<a.wav,b.webm,…>` enable the ignored live voice-typing test:
   `cargo test --lib live_bangla_transcription -- --ignored --nocapture`.
 
@@ -134,7 +136,11 @@ Notes on automation:
    the Accurate model `large-v3-q5_0` when it is installed.
 4. Recognition in speech chunks of at most 12 s through `whisper-cli` (`asr/whisper.rs`).
    Sarvam (`asr/sarvam.rs`) is used instead when a key is set and it supports the spoken
-   language. A language-specialised model (Bangla) is used automatically when installed.
+   language; with a Deepgram key too (the voice-typing key), Deepgram (`asr/deepgram.rs`)
+   listens to the same chunks and times Sarvam's words. Deepgram writes the captions on its
+   own where Sarvam can't (no key, no credits, language) or when chosen in Settings
+   (`Settings.online_engine`: `both | sarvam | deepgram`). A language-specialised model
+   (Bangla) is used automatically when installed.
 5. Bengali script repair (`asr/script.rs`) and language prompts for punctuation (`asr/prompt.rs`).
 6. Word timings become cues (`asr/segment.rs`), with cue edges snapped to VAD speech
    onsets and offsets.
@@ -155,6 +161,11 @@ Three measured facts shape all timing code:
   stretch of speech between pauses, at most 12 s (`vad::plan_pause_chunks`), which pins its
   text. Captions from online text never run across a pause of 0.5 s or more. Where the
   voice fills only part of a chunk, `asr/align.rs` uses an offline pass to find where.
+- **Deepgram times every word**, and its times hold up under music where pauses found from
+  the sound don't. With a Deepgram key, its words of the same chunks replace the offline
+  pass (`align::Timing::Exact`: no slowness check, which threw away the first word after a
+  pause). But it writes Bangla worse (16.0% vs 13.1% word errors) and skipped 14 s of
+  talking under music on a real vlog, so Sarvam keeps writing the text.
 - **Text is never altered by timing code.** Online words go into captions unchanged
   (`segment::Options::keep_all_words`), with a check that no letter was lost.
 
@@ -242,12 +253,16 @@ and re-measure instead of guessing.
   `lib/banglaWords.ts`. `components/usePhonetic.ts` wires it into the caption textarea.
   It keeps the roman letters of the word being typed and re-spells the whole word on
   every key.
-- **Voice typing**: `src/state/voice.ts` records with `getUserMedia` and `MediaRecorder`,
-  then sends the whole recording as raw bytes to `transcribe_voice`. `src-tauri/src/voice.rs`
-  calls Deepgram's pre-recorded API (`model=nova-3&language=bn&smart_format=true`; see
-  docs/VERIFICATION.md). The Deepgram key lives in `config/voice.json`, separate from
-  `settings.json`, and never reaches the web view. Words are inserted with
-  `lib/insertWords.ts`, which never replaces text that changed during recording.
+- **Voice typing** is live: `src/state/voice.ts` turns the microphone into 16 kHz 16-bit
+  PCM (a ScriptProcessor on an `AudioContext`) and sends ~128 ms pieces, numbered, to
+  `voice_live_audio`; `src-tauri/src/voice_live.rs` streams them over a WebSocket to
+  Deepgram (`interim_results`, `endpointing=300`, KeepAlive) and emits `voice-live` events.
+  The running guess and final words are written into the caption at the cursor as you speak
+  (`lib/insertWords.ts` from the caption text at the start; Cancel takes them out; editing the
+  caption meanwhile ends dictation). The whole recording is kept with `MediaRecorder` too:
+  if the live connection fails, it goes to `transcribe_voice` (Deepgram pre-recorded,
+  `voice.rs`) after Stop. The Deepgram key lives in `config/voice.json`, separate from
+  `settings.json`, and never reaches the web view.
 - WKWebView offers `navigator.mediaDevices` only when the app's Info.plist has
   `NSMicrophoneUsageDescription` (`src-tauri/Info.plist`). Tauri embeds that file only in
   dev builds (no `custom-protocol` feature); bundles merge it. A bare

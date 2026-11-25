@@ -90,7 +90,7 @@ function useElapsed(since: number, running: boolean): string {
 
 /** Listening → Processing → Stopped (or a problem), under the caption being dictated. */
 export function VoiceBar() {
-  const { phase, level, startedAt, error, note, stop, cancel, dismiss } = useVoice();
+  const { phase, level, startedAt, error, note, live, stop, cancel, dismiss } = useVoice();
   const hasKey = useVoice((s) => !!s.status?.keySaved);
   const elapsed = useElapsed(startedAt, phase === "listening");
 
@@ -122,7 +122,7 @@ export function VoiceBar() {
             <span key={i} style={{ transform: `scaleY(${Math.max(0.12, Math.min(1, level * 1.6 * b))})` }} />
           ))}
         </span>
-        <span className="voicebar__hint">Speak in Bangla, then stop.</span>
+        <span className="voicebar__hint">{live ? "Words appear as you speak." : "Speak in Bangla, then stop."}</span>
         <span className="voicebar__actions">
           <Button size="sm" variant="ghost" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
             Cancel
@@ -140,7 +140,7 @@ export function VoiceBar() {
       <div className="voicebar is-processing" role="status" aria-live="polite">
         <span className="spinner" aria-hidden />
         <span className="voicebar__state">Processing</span>
-        <span className="voicebar__hint">Writing down what you said…</span>
+        <span className="voicebar__hint">{live ? "Adding your last words…" : "Writing down what you said…"}</span>
         <span className="voicebar__actions">
           <Button size="sm" variant="ghost" onMouseDown={(e) => e.preventDefault()} onClick={cancel}>
             Cancel

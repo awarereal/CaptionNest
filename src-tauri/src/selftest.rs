@@ -24,8 +24,10 @@ pub struct SelfTest {
     model: PathBuf,
     out: PathBuf,
     language: String,
-    /// `--online`: use Sarvam with the key in SARVAM_API_KEY (developer testing).
+    /// `--online`: use Sarvam with the key in SARVAM_API_KEY and/or Deepgram with the key
+    /// in DEEPGRAM_API_KEY (developer testing); `--engine both|sarvam|deepgram` as in Settings.
     online: bool,
+    engine: String,
     /// `--resync <captions.srt>`: auto-sync those captions to the video instead of
     /// making new ones (`--from` / `--to` in seconds limit it to a section).
     resync: Option<PathBuf>,
@@ -47,6 +49,7 @@ impl SelfTest {
             out: abs(get("--out")?),
             language: get("--language").unwrap_or_else(|| "auto".into()),
             online: args.iter().any(|a| a == "--online"),
+            engine: get("--engine").unwrap_or_else(|| "both".into()),
             resync: get("--resync").map(abs),
             section: {
                 let ms = |flag: &str| get(flag).and_then(|v| v.parse::<f64>().ok()).map(|s| (s * 1000.0) as i64);
@@ -124,6 +127,12 @@ pub async fn run(app: &AppHandle, t: SelfTest) -> i32 {
             } else {
                 None
             },
+            deepgram: if t.online && t.engine != "sarvam" {
+                std::env::var("DEEPGRAM_API_KEY").ok().map(|key| crate::voice::Deepgram { key, http: state.http.clone() })
+            } else {
+                None
+            },
+            deepgram_only: t.engine == "deepgram",
         };
         let reporter = Reporter::new(app.clone(), "self-test".into(), JobKind::Generate);
         let res = pipeline::generate(&state.paths, req, "self-test", &tokio_util::sync::CancellationToken::new(), &reporter).await?;

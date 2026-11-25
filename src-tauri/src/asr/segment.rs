@@ -28,11 +28,14 @@ pub struct Options {
     /// The words are a finished transcript (online recognition): keep every one. Off for
     /// Whisper output, where instant duplicates and loops are removed.
     pub keep_all_words: bool,
+    /// How far a caption start may move to a speech onset. Whisper's word times bunch up
+    /// early in a chunk, so they get 0.6 s; Deepgram's own word times need far less.
+    pub onset_snap_ms: i64,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 150, speech: Vec::new(), keep_all_words: false }
+        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 150, speech: Vec::new(), keep_all_words: false, onset_snap_ms: 600 }
     }
 }
 
@@ -81,7 +84,7 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
         .iter()
         .map(|g| Inner { last_start: g[g.len() - 1].start_ms })
         .collect();
-    align_to_speech(&mut cues, &inner, &opts.speech);
+    align_to_speech(&mut cues, &inner, &opts.speech, opts.onset_snap_ms);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
 }
@@ -94,7 +97,7 @@ struct Inner {
 /// Moves each caption edge to the nearest real speech onset or offset close by, so a
 /// caption appears when the voice starts and leaves when it stops. Edges inside
 /// continuous speech (no onset/offset nearby) keep their word times.
-fn align_to_speech(cues: &mut [Cue], inner: &[Inner], speech: &[(i64, i64)]) {
+fn align_to_speech(cues: &mut [Cue], inner: &[Inner], speech: &[(i64, i64)], onset_snap_ms: i64) {
     if speech.is_empty() || cues.is_empty() {
         return;
     }
@@ -108,8 +111,8 @@ fn align_to_speech(cues: &mut [Cue], inner: &[Inner], speech: &[(i64, i64)]) {
     for i in 0..cues.len() {
         let (a, b) = raw[i];
         // Whisper's own word times bunch up early at the start of a chunk, so the
-        // speech onset is trusted within 0.6 s either way.
-        if let Some(o) = nearest(&onsets, a, a - 600, (a + 600).min(b - 200)).filter(|&o| o >= prev_end) {
+        // speech onset is trusted within 0.6 s either way (Options::onset_snap_ms).
+        if let Some(o) = nearest(&onsets, a, a - onset_snap_ms, (a + onset_snap_ms).min(b - 200)).filter(|&o| o >= prev_end) {
             cues[i].start_ms = o;
         }
         let next_start = raw.get(i + 1).map_or(i64::MAX, |r| r.0);
@@ -292,7 +295,7 @@ pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64
         }
     }
     let inner: Vec<Inner> = cues.iter().map(|c| Inner { last_start: c.start_ms }).collect();
-    align_to_speech(&mut cues, &inner, &opts.speech);
+    align_to_speech(&mut cues, &inner, &opts.speech, opts.onset_snap_ms);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
 }

@@ -249,8 +249,10 @@ export interface Settings {
   captionLanguage: string;
   recentProjects: RecentProject[];
   setupComplete: boolean;
-  /** Use Sarvam online recognition when a key is set. */
+  /** Use online recognition when a key is set. */
   onlineRecognition: boolean;
+  /** With both keys saved: "both" (Sarvam writes, Deepgram times), "sarvam" or "deepgram" (lib/online.ts). */
+  onlineEngine: string;
   /** "sk_ab…9lnQ" when a Sarvam key is saved (the key itself stays in Rust). */
   sarvamKeyHint?: string | null;
   /** Interface theme id (lib/theme.ts). */
@@ -334,4 +336,14 @@ export interface VoiceStatus {
 export interface Heard {
   text: string;
   confidence: number;
+}
+
+/** Live voice typing (Rust: voice_live::LiveEvent). */
+export interface VoiceLiveEvent {
+  id: number;
+  /** "words": a running guess, or final words when `isFinal`; "end": nothing more comes. */
+  kind: "words" | "end" | "error";
+  text: string;
+  isFinal: boolean;
+  error: AppError | null;
 }

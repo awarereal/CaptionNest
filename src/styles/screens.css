@@ -876,6 +876,77 @@
   color: var(--ok);
 }
 
+.onlinekey--inline {
+  margin: 0;
+}
+
+/* A row that follows a hint paragraph needs room to read as a new group. */
+.formrow--gap {
+  margin-top: 22px;
+}
+
+/* Settings > Online recognition: which service writes and which times. */
+.enginechoice {
+  display: grid;
+  gap: 8px;
+}
+
+.enginechoice__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  text-align: left;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--slate-2);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.enginechoice__item:hover {
+  border-color: var(--line-hover);
+}
+
+.enginechoice__item.is-on {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold) inset;
+  background: color-mix(in srgb, var(--gold) 7%, var(--slate-2));
+}
+
+.enginechoice__item:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.enginechoice__dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 2px solid var(--line-hover);
+}
+
+.enginechoice__item.is-on .enginechoice__dot {
+  border-color: var(--gold);
+  background: radial-gradient(circle, var(--gold) 0 4px, transparent 4.5px);
+}
+
+.enginechoice__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.enginechoice__name {
+  font-weight: 600;
+  color: var(--paper);
+}
+
 .linkish {
   padding: 0;
   height: auto;

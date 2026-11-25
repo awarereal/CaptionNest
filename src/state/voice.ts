@@ -1,15 +1,17 @@
-// Voice typing: record speech from the microphone, have Deepgram write it down, and put
-// the words into the caption at the cursor.
+// Voice typing: the microphone's sound streams to Deepgram (through Rust) while you speak,
+// and the words appear in the caption at the cursor as you say them: a running guess that
+// Deepgram corrects, made final at each short pause.
 //
-// The whole recording is recognized at once after "Stop" (Deepgram's pre-recorded mode
-// is more accurate than streaming). The caption only changes when words come back:
-// a stopped, failed or empty recording never touches the text. The Deepgram key stays in
-// the Rust backend; this side only knows whether one is saved.
+// The whole recording is kept too. If the live connection fails, it's sent after "Stop"
+// and written down at once (Deepgram's pre-recorded mode), so nothing said is lost. Cancel
+// takes the live words out again; editing the caption meanwhile ends dictation and keeps
+// the words so far. The Deepgram key stays in the Rust backend; this side only knows
+// whether one is saved.
 import { create } from "zustand";
 import { api, toAppError } from "../lib/api";
 import { useStore } from "./store";
 import { insertWords } from "../lib/insertWords";
-import type { VoiceStatus } from "../lib/types";
+import type { VoiceLiveEvent, VoiceStatus } from "../lib/types";
 
 export type VoicePhase = "idle" | "listening" | "processing" | "stopped" | "error";
 
@@ -47,6 +49,8 @@ interface VoiceState {
   error: VoiceError | null;
   /** What happened, shown in the Stopped state. */
   note: string | null;
+  /** Words are appearing while you speak (the live connection is open). */
+  live: boolean;
   refreshStatus: () => Promise<void>;
   start: (target: VoiceTarget) => Promise<void>;
   stop: () => void;
@@ -70,7 +74,48 @@ let noteTimer = 0;
 /** Bumped by every new recording and every cancel, so stale results are ignored. */
 let run = 0;
 
+// Live dictation.
+let liveId: number | null = null;
+/** False once the live connection failed: the recording is written down after Stop instead. */
+let liveOk = false;
+/** Sound recorded before the connection was open, sent once it is. */
+let pendingPcm: Uint8Array[] = [];
+/** The next sound piece's number (the backend puts pieces back in order). */
+let liveSeq = 0;
+/** Final words so far, and Deepgram's running guess at what follows. */
+let committed = "";
+let guess = "";
+/** The caption text as voice typing last wrote it, to notice the user editing meanwhile. */
+let written: string | null = null;
+let edited = false;
+let proc: ScriptProcessorNode | null = null;
+let unlistenLive: (() => void) | null = null;
+let liveEnded: (() => void) | null = null;
+
+const joinWords = (a: string, b: string) => [a.trim(), b.trim()].filter(Boolean).join(" ");
+
+function releaseLive() {
+  unlistenLive?.();
+  unlistenLive = null;
+  liveId = null;
+  pendingPcm = [];
+  liveSeq = 0;
+}
+
+/** Microphone samples (-1..1) as 16-bit little-endian PCM. */
+function toPcm16(samples: Float32Array): Uint8Array {
+  const out = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return new Uint8Array(out.buffer);
+}
+
 function release() {
+  proc?.disconnect();
+  if (proc) proc.onaudioprocess = null;
+  proc = null;
   cancelAnimationFrame(meterFrame);
   clearTimeout(limitTimer);
   stream?.getTracks().forEach((t) => t.stop());
@@ -145,11 +190,92 @@ export const useVoice = create<VoiceState>((set, get) => {
     showNote(`Added ${count} ${count === 1 ? "word" : "words"}. Edit them like any other text.`);
   };
 
+  const findCue = (target: VoiceTarget) => {
+    const st = useStore.getState();
+    return st.history.present.find((t) => t.id === st.activeTrackId)?.cues.find((c) => c.id === target.cueId);
+  };
+
+  /** Writes the words heard so far into the caption at the cursor, replacing the last guess. */
+  const writeLive = (target: VoiceTarget, words: string): boolean => {
+    const cue = findCue(target);
+    if (!cue) return false;
+    if (cue.text !== (written ?? target.text)) {
+      edited = true;
+      return false;
+    }
+    const { text, caret } = words ? insertWords(target.text, target, words) : { text: target.text, caret: target.end };
+    if (text !== cue.text) useStore.getState().setCueText(cue.id, text);
+    written = text;
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>(`[data-cue-id="${CSS.escape(cue.id)}"] textarea`);
+      if (!el) return;
+      if (document.activeElement !== el) el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+    return true;
+  };
+
+  /** Takes the live words out of the caption again (unless the user changed it since). */
+  const unwriteLive = (target: VoiceTarget) => {
+    const cue = findCue(target);
+    if (cue && written !== null && cue.text === written && cue.text !== target.text) useStore.getState().setCueText(cue.id, target.text);
+    written = null;
+  };
+
+  const onLive = (mine: number, target: VoiceTarget, ev: VoiceLiveEvent) => {
+    if (run !== mine || ev.id !== liveId) return;
+    if (ev.kind === "end") {
+      liveEnded?.();
+      return;
+    }
+    if (ev.kind === "error") {
+      liveOk = false;
+      set({ live: false });
+      return;
+    }
+    if (ev.isFinal) {
+      committed = joinWords(committed, ev.text);
+      guess = "";
+    } else {
+      guess = ev.text;
+    }
+    if (edited || get().phase !== "listening") return;
+    // Editing the caption while speaking ends dictation; the words so far stay.
+    if (!writeLive(target, joinWords(committed, guess)) && edited) get().stop();
+  };
+
   const process = async (mine: number, target: VoiceTarget, type: string, ms: number) => {
     const blob = new Blob(chunks, { type: type || chunks[0]?.type || "" });
     chunks = [];
     release();
     if (run !== mine) return;
+    if (liveOk && liveId !== null) {
+      const id = liveId;
+      // Deepgram writes down the last words, then ends the stream.
+      await new Promise<void>((done) => {
+        liveEnded = done;
+        void api.finishVoiceLive(id).catch(() => done());
+        window.setTimeout(done, 8000);
+      });
+      liveEnded = null;
+      if (run !== mine) return;
+      releaseLive();
+      if (edited) {
+        showNote("Voice typing stopped because the caption was edited. The words so far were kept.");
+        return;
+      }
+      if (liveOk) {
+        const words = joinWords(committed, guess);
+        writeLive(target, words);
+        const count = words.split(/\s+/).filter(Boolean).length;
+        if (count === 0) showNote(ms < MIN_MS ? "Stopped. Nothing was added: the recording was too short." : "Stopped. No words were heard.");
+        else showNote(`Added ${count} ${count === 1 ? "word" : "words"}. Edit them like any other text.`);
+        return;
+      }
+    }
+    // The live connection didn't work: write down the whole recording instead.
+    releaseLive();
+    unwriteLive(target);
     if (ms < MIN_MS || blob.size === 0) {
       showNote("Stopped. Nothing was added: the recording was too short.");
       return;
@@ -184,6 +310,7 @@ export const useVoice = create<VoiceState>((set, get) => {
     startedAt: 0,
     error: null,
     note: null,
+    live: false,
 
     async refreshStatus() {
       try {
@@ -199,7 +326,13 @@ export const useVoice = create<VoiceState>((set, get) => {
       unsent = null;
       const mine = ++run;
       clearTimeout(noteTimer);
-      set({ target, phase: "listening", error: null, note: null, level: 0, startedAt: Date.now() });
+      set({ target, phase: "listening", error: null, note: null, level: 0, startedAt: Date.now(), live: false });
+      committed = "";
+      guess = "";
+      written = null;
+      edited = false;
+      liveOk = false;
+      releaseLive();
 
       if (!get().status?.keySaved) {
         await get().refreshStatus();
@@ -242,12 +375,39 @@ export const useVoice = create<VoiceState>((set, get) => {
       recorder.start(1000);
       set({ startedAt });
 
-      // Level meter, so it's obvious the microphone hears you.
+      // Level meter, so it's obvious the microphone hears you, and the sound for live words.
       try {
-        audio = new AudioContext();
+        try {
+          // 16 kHz is all speech recognition needs, and a quarter of the data to send.
+          audio = new AudioContext({ sampleRate: 16_000 });
+        } catch {
+          audio = new AudioContext();
+        }
+        const source = audio.createMediaStreamSource(stream);
         const analyser = audio.createAnalyser();
         analyser.fftSize = 1024;
-        audio.createMediaStreamSource(stream).connect(analyser);
+        source.connect(analyser);
+        try {
+          proc = audio.createScriptProcessor(2048, 1, 1);
+          const mute = audio.createGain();
+          mute.gain.value = 0;
+          source.connect(proc);
+          proc.connect(mute);
+          mute.connect(audio.destination);
+          proc.onaudioprocess = (e) => {
+            if (run !== mine || !liveOk) return;
+            const pcm = toPcm16(e.inputBuffer.getChannelData(0));
+            if (liveId === null) {
+              // About 50 s at 16 kHz: more than any connection takes.
+              if (pendingPcm.length < 400) pendingPcm.push(pcm);
+              return;
+            }
+            void api.voiceLiveAudio(liveId, liveSeq++, pcm).catch(() => undefined);
+          };
+          liveOk = true;
+        } catch {
+          liveOk = false;
+        }
         const buf = new Float32Array(analyser.fftSize);
         let last = 0;
         const tick = (now: number) => {
@@ -266,6 +426,44 @@ export const useVoice = create<VoiceState>((set, get) => {
         // The meter is a nicety; recording works without it.
       }
       limitTimer = window.setTimeout(() => get().stop(), MAX_MS);
+
+      // Live words: open the stream to Deepgram. Sound recorded meanwhile is sent once it's open.
+      if (liveOk && audio) {
+        const rate = audio.sampleRate;
+        try {
+          const unlisten = await api.onVoiceLive((ev) => onLive(mine, target, ev));
+          if (run !== mine) {
+            unlisten();
+            return;
+          }
+          unlistenLive = unlisten;
+          const id = await api.startVoiceLive(target.language, rate);
+          if (run !== mine) {
+            void api.cancelVoiceLive(id).catch(() => undefined);
+            return;
+          }
+          liveId = id;
+          for (const p of pendingPcm) void api.voiceLiveAudio(id, liveSeq++, p).catch(() => undefined);
+          pendingPcm = [];
+          if (get().phase === "listening") set({ live: true });
+        } catch (e) {
+          liveOk = false;
+          pendingPcm = [];
+          if (run !== mine) return;
+          const err = toAppError(e);
+          // A key problem stops here; anything else falls back to writing it down after Stop.
+          if (err.code === "voice_key" || err.code === "voice_credits") {
+            run++;
+            if (recorder) {
+              recorder.onstop = null;
+              if (recorder.state !== "inactive") recorder.stop();
+            }
+            chunks = [];
+            releaseLive();
+            fail({ message: err.message, fix: "settings" });
+          }
+        }
+      }
     },
 
     stop() {
@@ -279,8 +477,13 @@ export const useVoice = create<VoiceState>((set, get) => {
     },
 
     cancel() {
-      const { phase } = get();
+      const { phase, target } = get();
       run++;
+      if (liveId !== null) void api.cancelVoiceLive(liveId).catch(() => undefined);
+      liveEnded?.();
+      releaseLive();
+      // Cancel adds nothing: live words already written come out again.
+      if (target && (phase === "listening" || phase === "processing")) unwriteLive(target);
       if (recorder) {
         recorder.onstop = null;
         if (recorder.state !== "inactive") recorder.stop();

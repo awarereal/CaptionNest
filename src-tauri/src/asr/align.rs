@@ -16,7 +16,25 @@
 use super::Word;
 
 /// Online phrases (text with a chunk-wide span) → the same words, each with a time.
+#[cfg(test)]
 pub fn place_words(phrases: &[Word], timed: Option<&[Word]>, speech: &[(i64, i64)]) -> Vec<Word> {
+    place_words_timed_by(phrases, timed, speech, Timing::Offline)
+}
+
+/// Where the timed words come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Timing {
+    /// Whisper: it smears words over audio it skipped, so a word said implausibly slowly
+    /// (often the one next to a pause) gives no time.
+    Offline,
+    /// Deepgram: every word it heard keeps its time. The slowness check above threw away
+    /// the first word after a pause, i.e. most caption starts: with music under exactly
+    /// timed Bangla speech, starts were up to 1 s early.
+    Exact,
+}
+
+/// `place_words` with timed words from `timing`.
+pub fn place_words_timed_by(phrases: &[Word], timed: Option<&[Word]>, speech: &[(i64, i64)], timing: Timing) -> Vec<Word> {
     let mut out: Vec<Word> = Vec::new();
     for p in phrases {
         let words = split_words(&collapse_repeats(&p.text));
@@ -27,7 +45,7 @@ pub fn place_words(phrases: &[Word], timed: Option<&[Word]>, speech: &[(i64, i64
         let acoustic: Vec<&Word> = timed
             .map(|t| t.iter().filter(|w| w.end_ms > lo - 300 && w.start_ms < hi + 300 && !letters(&w.text).is_empty()).collect())
             .unwrap_or_default();
-        let mut spans = align(&words, &acoustic, lo, hi, speech).unwrap_or_else(|| spread_over_speech(&words, lo, hi, speech));
+        let mut spans = align(&words, &acoustic, lo, hi, speech, timing).unwrap_or_else(|| spread_over_speech(&words, lo, hi, speech));
         settle(&words, &mut spans, lo, hi);
         // Never before the previous chunk's last word.
         let floor = out.last().map_or(i64::MIN, |w| w.start_ms);
@@ -129,7 +147,7 @@ pub(crate) fn similarity(a: &[char], b: &[char]) -> f32 {
 /// Times for `words` from the offline words that clearly are the same words, or None if
 /// too few agree. Only sure matches count: the same word (or nearly) in the same order,
 /// said at a believable pace. Everything else is placed between those anchors.
-fn align(words: &[String], acoustic: &[&Word], lo: i64, hi: i64, speech: &[(i64, i64)]) -> Option<Vec<(i64, i64)>> {
+fn align(words: &[String], acoustic: &[&Word], lo: i64, hi: i64, speech: &[(i64, i64)], timing: Timing) -> Option<Vec<(i64, i64)>> {
     let ol: Vec<Vec<char>> = words.iter().map(|w| letters(w)).collect();
     let al: Vec<Vec<char>> = acoustic.iter().map(|w| letters(&w.text)).collect();
     let (n, m) = (ol.len(), al.len());
@@ -145,7 +163,7 @@ fn align(words: &[String], acoustic: &[&Word], lo: i64, hi: i64, speech: &[(i64,
             let ms = (acoustic[b].end_ms - acoustic[a].start_ms).max(1);
             // Inside this chunk (its text can't be anywhere else) and at a real pace.
             let inside = acoustic[j].start_ms >= lo - 150 && acoustic[j].start_ms <= hi;
-            inside && acoustic[j].end_ms > acoustic[j].start_ms && count as i64 * 1000 / ms >= 8
+            inside && acoustic[j].end_ms > acoustic[j].start_ms && (timing == Timing::Exact || count as i64 * 1000 / ms >= 8)
         })
         .collect();
     // Best in-order pairing by weight (how alike × how long).
@@ -389,6 +407,18 @@ mod tests {
     fn repeated_loops_are_cut_to_two() {
         assert_eq!(collapse_repeats("ভাই কি করছিস?\nভাই।\nভাই।\nভাই।\nভাই। ভাই। ভাই।\nচলো।"), "ভাই কি করছিস? ভাই। ভাই। চলো।");
         assert_eq!(collapse_repeats("দাম ২.৫০ টাকা। এক জোড়া, এক জোড়া।"), "দাম ২.৫০ টাকা। এক জোড়া, এক জোড়া।");
+    }
+
+    #[test]
+    fn exact_times_keep_the_first_word_after_a_pause() {
+        // From the music test: Deepgram heard "তবে" at 5.31 s (truth 5.38 s) after a 1.8 s
+        // pause. The slowness check (for Whisper) dropped it and the caption began 0.4 s early.
+        let phrase = w(3_000, 8_000, "কথা ছিল। তবে আদালতের জরুরি");
+        let heard = vec![w(3_220, 3_540, "কথা"), w(3_540, 3_700, "ছিল।"), w(5_310, 5_630, "তবে"), w(5_630, 6_350, "আদালতের"), w(6_350, 6_750, "জরুরি")];
+        let exact = place_words_timed_by(&[phrase.clone()], Some(&heard), &[], Timing::Exact);
+        assert_eq!(exact[2].start_ms, 5_310, "{exact:?}");
+        let offline = place_words(&[phrase], Some(&heard), &[]);
+        assert_ne!(offline[2].start_ms, 5_310, "{offline:?}");
     }
 
     #[test]

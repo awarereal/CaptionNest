@@ -101,6 +101,13 @@ key is reported as `401 INVALID_AUTH` → "Deepgram didn't accept the API key".
 
 In the app (dev build, automation bridge) a recording fed in through a stand-in
 microphone went Listening → Processing → inserted at the cursor as one undo step.
+
+Live (words while you speak, November 2026): Deepgram's streaming API with Nova-3 `bn`,
+fed 20 s of the Bangla phrase recording at speaking pace (`voice_live::tests::live_streaming_words`):
+first words after 1.4 s, a corrected guess about every second, final words at each pause.
+In the app with a stand-in microphone: the first words were in the caption 2.3-4.6 s after
+pressing the microphone (connecting included), 19 updates while speaking, all 35 words in
+place after Stop, the caption's own text kept; Cancel took the live words out again.
 A real microphone was not exercised by automation; macOS needs `NSMicrophoneUsageDescription`
 (now in `src-tauri/Info.plist`) for the web view to offer the microphone at all.
 
@@ -118,6 +125,32 @@ Word times now come from whisper.cpp's DTW token alignment (`-dtw`, costs about 
 time on Apple-chip GPUs and 21% on CPU), and caption edges at pauses are placed on the
 speech onsets/offsets found by the Silero VAD. In CapCut the SRT lands within one video
 frame (CapCut snaps to frames).
+
+## Online recognition: Sarvam's words, Deepgram's timing (November 2026)
+
+The exact-timing Bangla phrase recording (below), clean and with background music from a
+real vlog mixed under it. A caption start is scored only against the phrase that begins
+with the same word, so engines that group words differently compare fairly.
+
+| Recording | Engine | Word errors | Starts within 0.15 s | 1 in 10 starts off by |
+|---|---|---|---|---|
+| clean | Sarvam (offline model times the words) | 12.2% | 81% | 0.34 s+ |
+| clean | Deepgram only | 14.4% | 84% | 0.17 s+ |
+| clean | **Sarvam writes, Deepgram times** | **12.2%** | **100%** | **0.03 s+** |
+| music 6 dB under speech | Sarvam | 14.4% | 72% | 0.44 s+ |
+| music 6 dB under speech | Deepgram only | 19.7% | 88% | 0.18 s+ |
+| music 6 dB under speech | **Sarvam writes, Deepgram times** | **14.5%** | **100%** | **0.07 s+** |
+| music as loud as speech | **Sarvam writes, Deepgram times** | 16.6% | 86% | 0.23 s+ |
+
+On the 5-minute FLEURS clip used for `bn_sarvam.py`, Deepgram Nova-3 (`language=bn`) made
+16.0% word / 5.9% letter errors (Sarvam saaras:v4: 13.1% / 4.0%). On a 12-minute vlog with
+music and several voices, Deepgram returned 1,190 words to Sarvam's 1,413 and heard
+nothing from 66 s to 82 s of clear talking; sent the same short pause-to-pause pieces as
+Sarvam, it heard more (58 words vs 45 from one 34 s request). Its own language detection
+called that vlog Spanish, so it's always told the language. Deepgram stretches the last
+word before a pause (0.8 s for a 0.34 s word), so a word is capped at 0.1 s per letter
+plus 0.15 s. Breath snapping (Auto-sync) is skipped for Deepgram-timed captions: it moved
+the caption before a breath to the breath and left captions up through pauses.
 
 ## Auto-sync captions
 

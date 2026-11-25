@@ -42,6 +42,7 @@ reqwest = { version = "0.13", default-features = false, features = ["stream", "n
 # Offline machine translation (runs Argos Translate models without Python).
 ct2rs = { version = "0.11.3", default-features = false, features = ["ruy"] }
 sentencepiece = { version = "0.14.0", features = ["static"] }
+tokio-tungstenite = { version = "0.30.0", features = ["native-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ct2rs = { version = "0.11.3", default-features = false, features = ["ruy", "accelerate"] }
