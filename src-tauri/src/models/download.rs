@@ -76,14 +76,14 @@ pub async fn download_verified(
         .await
         .map_err(|e| AppError::internal(e.to_string()))??;
     if !actual.eq_ignore_ascii_case(sha256) {
-        let _ = std::fs::remove_file(&part);
+        let _ = paths::retry_io(|| std::fs::remove_file(&part));
         return Err(AppError::new(
             ErrorCode::ChecksumMismatch,
             "The download was damaged and has been removed. Please try again.",
         )
         .with_detail(format!("expected {sha256}, got {actual}")));
     }
-    std::fs::rename(&part, dest)?;
+    paths::retry_io(|| std::fs::rename(&part, dest))?;
     Ok(())
 }
 
@@ -97,7 +97,7 @@ async fn fetch_into_part(
 ) -> AppResult<()> {
     let mut existing = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
     if existing > size {
-        std::fs::remove_file(part)?;
+        paths::retry_io(|| std::fs::remove_file(part))?;
         existing = 0;
     }
     if existing == size {
@@ -152,7 +152,7 @@ async fn fetch_into_part(
         since_start += chunk.len() as u64;
         if received > size {
             drop(file);
-            std::fs::remove_file(part)?;
+            paths::retry_io(|| std::fs::remove_file(part))?;
             return Err(AppError::new(ErrorCode::ChecksumMismatch, "The download was larger than expected and has been removed."));
         }
         if last_emit.elapsed() >= Duration::from_millis(200) {
@@ -163,6 +163,7 @@ async fn fetch_into_part(
     }
     file.flush()?;
     file.sync_all()?;
+    drop(file);
     on_progress(Progress { received, total: size, bytes_per_sec: 0.0 });
     if received < size {
         return Err(AppError::new(ErrorCode::Network, "The connection was interrupted.").with_detail(format!("{received}/{size} bytes")));
@@ -213,9 +214,9 @@ pub fn extract_argos_package(archive: &Path, dest: &Path) -> AppResult<()> {
         .or_else(|| staging.path().join("metadata.json").is_file().then(|| staging.path().to_path_buf()))
         .ok_or_else(|| AppError::new(ErrorCode::ChecksumMismatch, "The language package has an unexpected layout."))?;
     if dest.exists() {
-        std::fs::remove_dir_all(dest)?;
+        paths::retry_io(|| std::fs::remove_dir_all(dest))?;
     }
-    std::fs::rename(&root, dest)?;
+    paths::retry_io(|| std::fs::rename(&root, dest))?;
     Ok(())
 }
 

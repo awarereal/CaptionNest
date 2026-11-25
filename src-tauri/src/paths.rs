@@ -134,6 +134,27 @@ pub fn ensure_space(path: &Path, needed: u64, what: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Runs a file operation, retrying briefly when Windows reports the file as in use.
+/// Antivirus scanners and search indexers often hold freshly written files for a moment,
+/// which makes an immediate rename or delete fail with "Access is denied".
+pub fn retry_io<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match op() {
+            Err(e) if attempt < 20 && is_transient_lock(&e) => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50 * attempt.min(6)));
+            }
+            other => return other,
+        }
+    }
+}
+
+fn is_transient_lock(e: &std::io::Error) -> bool {
+    // ERROR_ACCESS_DENIED (5), ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33)
+    cfg!(windows) && (e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+}
+
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
     let mut v = bytes as f64;

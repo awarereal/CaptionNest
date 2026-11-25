@@ -363,7 +363,7 @@ fn export_srt(path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     std::io::Write::write_all(&mut tmp, text.as_bytes())?;
     tmp.as_file().sync_all()?;
-    tmp.persist(&target).map_err(|e| AppError::from(e.error))?;
+    project::persist(tmp, &target)?;
     Ok(ExportResult { path, cue_count: sorted.len(), bytes: text.len() })
 }
 

@@ -59,7 +59,7 @@ pub fn save(config_dir: &Path, s: &Settings) -> AppResult<()> {
     let mut tmp = tempfile::NamedTempFile::new_in(config_dir)?;
     tmp.write_all(&serde_json::to_vec_pretty(s)?)?;
     tmp.as_file().sync_all()?;
-    tmp.persist(config_dir.join(FILE)).map_err(|e| crate::error::AppError::from(e.error))?;
+    crate::project::persist(tmp, &config_dir.join(FILE))?;
     Ok(())
 }
 

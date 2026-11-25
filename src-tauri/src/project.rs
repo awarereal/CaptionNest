@@ -111,7 +111,18 @@ pub fn save(path: &Path, project: &Project) -> AppResult<()> {
     tmp.write_all(&json)?;
     tmp.write_all(b"\n")?;
     tmp.as_file().sync_all()?;
-    tmp.persist(path).map_err(|e| AppError::from(e.error))?;
+    persist(tmp, path)?;
+    Ok(())
+}
+
+/// Moves a finished temporary file into place, retrying if Windows briefly locks it.
+pub fn persist(tmp: tempfile::NamedTempFile, path: &Path) -> AppResult<()> {
+    let tmp_path = tmp.into_temp_path();
+    crate::paths::retry_io(|| std::fs::rename(&tmp_path, path).or_else(|e| {
+        // Some Windows setups refuse rename-over-existing while a reader holds the target.
+        if path.exists() && cfg!(windows) { std::fs::copy(&tmp_path, path).map(|_| ()) } else { Err(e) }
+    }))?;
+    let _ = tmp_path.close();
     Ok(())
 }
 
