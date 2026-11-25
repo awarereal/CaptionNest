@@ -62,6 +62,20 @@ export function WorkspaceScreen() {
             Graphics acceleration wasn't available, so this run used the processor. Results are the same; it just took longer.
           </Banner>
         )}
+        {warnings.some((w) => w.startsWith("online_fallback_deepgram:")) && (
+          <Banner
+            tone="gold"
+            onClose={() => useStore.setState({ warnings: warnings.filter((w) => !w.startsWith("online_fallback_deepgram:")) })}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => useStore.getState().openPanel("settings", "online")}>
+                Online settings
+              </Button>
+            }
+          >
+            Sarvam didn't work this time ({warnings.find((w) => w.startsWith("online_fallback_deepgram:"))!.slice("online_fallback_deepgram:".length)}), so
+            these captions were made with Deepgram.
+          </Banner>
+        )}
         {warnings.some((w) => w.startsWith("online_fallback:")) && (
           <Banner
             tone="gold"

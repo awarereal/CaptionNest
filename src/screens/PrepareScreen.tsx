@@ -28,7 +28,8 @@ import { describeError, type RecoveryAction } from "../lib/errors";
 import { browseVideo } from "../lib/fileFlows";
 import type { AppError, AudioTrack, PlanInfo, Stage } from "../lib/types";
 import { DownloadStatus } from "../components/ModelCard";
-import { hasOnlineKey, onlineActive } from "../lib/online";
+import { hasOnlineKey, onlinePlan, planServices, type OnlinePlan } from "../lib/online";
+import { useVoice } from "../state/voice";
 
 const FEATURED = ["en", "bn", "hi", "ar"];
 
@@ -88,17 +89,34 @@ function MediaFacts() {
 }
 
 /** Which engine will recognize the speech, and how to switch. */
-function EngineNote({ online, spoken }: { online: boolean; spoken: string }) {
+const PLAN_NOTE: Record<Exclude<OnlinePlan, null>, { title: string; hint: string }> = {
+  "sarvam+deepgram": {
+    title: "Online: Sarvam writes, Deepgram times",
+    hint: "Every word is timed, so captions stay with the voice, even over music. Uses credits from both.",
+  },
+  sarvam: {
+    title: "Recognized online with Sarvam AI",
+    hint: "The most accurate option for Bangla. The speech in this video is sent to Sarvam; it uses your Sarvam credits.",
+  },
+  deepgram: {
+    title: "Recognized online with Deepgram",
+    hint: "Every word is timed. The sound of this video is sent to Deepgram; it uses your Deepgram credits.",
+  },
+};
+
+function EngineNote({ plan, spoken }: { plan: OnlinePlan; spoken: string }) {
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
   const openPanel = useStore((s) => s.openPanel);
-  if (online) {
+  const deepgramKey = useVoice((s) => !!s.status?.keySaved);
+  if (plan) {
+    const note = PLAN_NOTE[plan];
     return (
       <div className="engine engine--online">
         <Globe size={18} />
         <div className="engine__body">
-          <p className="engine__title">Recognized online with Sarvam AI</p>
-          <p className="hint">The most accurate option for Bangla. The speech in this video is sent to Sarvam; it uses your Sarvam credits.</p>
+          <p className="engine__title">{note.title}</p>
+          <p className="hint">{note.hint}</p>
         </div>
         <Button size="sm" variant="ghost" onClick={() => void update({ onlineRecognition: false })}>
           Use offline
@@ -106,21 +124,21 @@ function EngineNote({ online, spoken }: { online: boolean; spoken: string }) {
       </div>
     );
   }
-  if (hasOnlineKey(settings) && !(settings?.onlineRecognition ?? true)) {
+  if (hasOnlineKey(settings, deepgramKey) && !(settings?.onlineRecognition ?? true)) {
     return (
       <div className="engine">
         <Desktop size={18} />
         <div className="engine__body">
           <p className="engine__title">Recognized on this computer</p>
-          <p className="hint">Online recognition with Sarvam is off.</p>
+          <p className="hint">Online recognition is off.</p>
         </div>
         <Button size="sm" variant="ghost" onClick={() => void update({ onlineRecognition: true })}>
-          Use Sarvam
+          Use online
         </Button>
       </div>
     );
   }
-  if (!hasOnlineKey(settings) && (spoken === "bn" || spoken === "auto")) {
+  if (!hasOnlineKey(settings, deepgramKey) && (spoken === "bn" || spoken === "auto")) {
     return (
       <button className="engine engine--hint" onClick={() => openPanel("settings", "online")}>
         <Globe size={18} />
@@ -182,8 +200,9 @@ function CaptionOptions() {
     return map;
   }, [models]);
 
-  // Bangla is written well when a Bangla model is installed or Sarvam is on.
-  const banglaReady = !!banglaModel?.installed || onlineActive(settings, "bn");
+  const deepgramKey = useVoice((s) => !!s.status?.keySaved);
+  // Bangla is written well when a Bangla model is installed or online recognition is on.
+  const banglaReady = !!banglaModel?.installed || onlinePlan(settings, deepgramKey, "bn", true) !== null;
 
   const spokenItems: PickerItem[] = useMemo(() => {
     const auto: PickerItem = { value: "auto", label: "Detect automatically", group: "Automatic", meta: "Works best with one main language" };
@@ -247,7 +266,8 @@ function CaptionOptions() {
   const spokenLang = language(spoken);
   const missingPacks = (plan?.missingPackages ?? []).map((id) => models?.argos.find((p) => p.id === id)).filter(Boolean);
   const needsTranslator = caption === "en" && spoken !== "en" && !translator;
-  const online = onlineActive(settings, spoken);
+  const engines = onlinePlan(settings, deepgramKey, spoken, !!model);
+  const online = engines !== null;
   const noModel = !model && !online;
   const blocked = noModel || needsTranslator || missingPacks.length > 0 || audioStream === null;
 
@@ -286,7 +306,7 @@ function CaptionOptions() {
         )
       )}
 
-      <EngineNote online={online} spoken={spoken} />
+      <EngineNote plan={engines} spoken={spoken} />
 
       <div className="formrow">
         <label className="label" htmlFor="spoken">
@@ -436,7 +456,7 @@ function CaptionOptions() {
         <Button variant="primary" size="lg" icon={<Subtitles size={20} weight="bold" />} onClick={() => void start()} disabled={blocked}>
           Generate captions
         </Button>
-        <p className="hint">{online ? "Recognized online by Sarvam, usually in seconds." : "Runs on this computer."} You can stop at any time.</p>
+        <p className="hint">{online ? `Recognized online by ${planServices(engines)}, usually in seconds.` : "Runs on this computer."} You can stop at any time.</p>
       </div>
     </div>
   );

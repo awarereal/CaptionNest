@@ -192,6 +192,111 @@ fn parse(body: &[u8]) -> AppResult<Heard> {
     Ok(best.map(|a| Heard { text: a.transcript, confidence: a.confidence }).unwrap_or(Heard { text: String::new(), confidence: 0.0 }))
 }
 
+// ---------- captions: every word with its own time ----------
+
+/// The Deepgram key and HTTP client for one captions job. Debug output never shows the key.
+#[derive(Clone)]
+pub struct Deepgram {
+    pub key: String,
+    pub http: reqwest::Client,
+}
+
+impl std::fmt::Debug for Deepgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Deepgram { key: <hidden> }")
+    }
+}
+
+/// Deepgram's code for a spoken language, for languages its Nova-3 model is known to
+/// handle. Deepgram accepts any code without complaint, so the list is ours; other
+/// languages use Sarvam or the offline models.
+pub fn caption_language(lang: &str) -> Option<&'static str> {
+    Some(match lang {
+        "bn" => "bn",
+        "en" => "en",
+        "hi" => "hi",
+        "es" => "es",
+        "fr" => "fr",
+        "de" => "de",
+        "pt" => "pt",
+        "it" => "it",
+        "nl" => "nl",
+        "ja" => "ja",
+        "ru" => "ru",
+        _ => return None,
+    })
+}
+
+/// A recognized word: times in ms from the start of the audio sent, text as written
+/// (with punctuation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedWord {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    pub confidence: f32,
+}
+
+#[derive(Deserialize)]
+struct WordsResponse {
+    results: WordsResults,
+}
+
+#[derive(Deserialize)]
+struct WordsResults {
+    channels: Vec<WordsChannel>,
+}
+
+#[derive(Deserialize)]
+struct WordsChannel {
+    alternatives: Vec<WordsAlternative>,
+}
+
+#[derive(Deserialize)]
+struct WordsAlternative {
+    #[serde(default)]
+    words: Vec<DgWord>,
+}
+
+#[derive(Deserialize)]
+struct DgWord {
+    word: String,
+    #[serde(default)]
+    punctuated_word: Option<String>,
+    start: f64,
+    end: f64,
+    #[serde(default)]
+    confidence: f32,
+}
+
+fn parse_words(body: &[u8]) -> AppResult<Vec<TimedWord>> {
+    let r: WordsResponse = serde_json::from_slice(body)
+        .map_err(|e| AppError::new(ErrorCode::OnlineFailed, "Deepgram sent a reply CaptionNest couldn't read.").with_detail(e.to_string()))?;
+    let words = r.results.channels.into_iter().next().and_then(|c| c.alternatives.into_iter().next()).map(|a| a.words).unwrap_or_default();
+    Ok(words
+        .into_iter()
+        .map(|w| TimedWord {
+            start_ms: (w.start * 1000.0).round() as i64,
+            end_ms: (w.end * 1000.0).round() as i64,
+            text: w.punctuated_word.unwrap_or(w.word),
+            confidence: w.confidence,
+        })
+        .collect())
+}
+
+/// Recognizes a piece of a video's sound (16 kHz WAV) for captions.
+pub async fn recognize_words(dg: &Deepgram, wav: Vec<u8>, language: &str) -> AppResult<Vec<TimedWord>> {
+    let body = post(&dg.http, &dg.key, wav, "audio/wav", language).await.map_err(|e| {
+        // The voice-typing wording ("the recording…") doesn't fit a video's sound track.
+        if e.code == ErrorCode::VoiceFailed {
+            AppError { message: "Deepgram couldn't process this video's sound.".into(), ..e }
+        } else {
+            e
+        }
+    })?;
+    parse_words(&body)
+}
+
 /// Maps a Deepgram error reply to a plain message. `None` means "worth retrying".
 fn classify(status: u16, body: &[u8]) -> (Option<AppError>, String) {
     let v: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
@@ -213,12 +318,18 @@ fn classify(status: u16, body: &[u8]) -> (Option<AppError>, String) {
 }
 
 async fn listen(http: &reqwest::Client, key: &str, audio: Vec<u8>, mime: &str, lang: &str) -> AppResult<Heard> {
-    if key.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err(AppError::new(ErrorCode::VoiceKey, "The Deepgram key contains spaces or line breaks. Copy it again from the Deepgram console."));
-    }
     let Some(language) = language_code(lang) else {
         return Err(AppError::new(ErrorCode::VoiceFailed, "Voice typing works in Bangla and English captions."));
     };
+    let body = post(http, key, audio, mime, language).await?;
+    parse(&body)
+}
+
+/// One pre-recorded request (Nova-3, punctuation), with retries. Returns the reply body.
+async fn post(http: &reqwest::Client, key: &str, audio: Vec<u8>, mime: &str, language: &str) -> AppResult<Vec<u8>> {
+    if key.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(AppError::new(ErrorCode::VoiceKey, "The Deepgram key contains spaces or line breaks. Copy it again from the Deepgram console."));
+    }
     // Every value is a fixed ASCII word, so the query needs no escaping.
     let url = format!("{LISTEN}?model={MODEL}&language={language}&smart_format=true&punctuate=true");
     let mut last = AppError::new(ErrorCode::Network, "Couldn't reach Deepgram. Check your internet connection and try again.");
@@ -231,7 +342,7 @@ async fn listen(http: &reqwest::Client, key: &str, audio: Vec<u8>, mime: &str, l
             .header("Authorization", format!("Token {key}"))
             .header("Content-Type", content_type(mime))
             .body(audio.clone())
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(300))
             .send()
             .await;
         let res = match sent {
@@ -244,7 +355,7 @@ async fn listen(http: &reqwest::Client, key: &str, audio: Vec<u8>, mime: &str, l
         let status = res.status().as_u16();
         let body = res.bytes().await.unwrap_or_default();
         if status == 200 {
-            return parse(&body);
+            return Ok(body.to_vec());
         }
         match classify(status, &body) {
             (Some(err), _) => return Err(err),
@@ -266,6 +377,20 @@ mod tests {
         assert!((h.confidence - 0.93).abs() < 1e-6);
         let empty = parse(br#"{"results":{"channels":[{"alternatives":[]}]}}"#).unwrap();
         assert_eq!(empty.text, "");
+    }
+
+    #[test]
+    fn caption_words_keep_their_times_and_punctuation() {
+        let body = r#"{"results":{"channels":[{"alternatives":[{"transcript":"আমি ভালো আছি।","words":[
+            {"word":"আমি","start":0.48,"end":0.8,"confidence":0.99,"punctuated_word":"আমি"},
+            {"word":"ভালো","start":0.8,"end":1.12,"confidence":0.97,"punctuated_word":"ভালো"},
+            {"word":"আছি","start":1.12,"end":1.6,"confidence":0.95,"punctuated_word":"আছি।"}]}]}]}}"#;
+        let w = parse_words(body.as_bytes()).unwrap();
+        assert_eq!(w.len(), 3);
+        assert_eq!((w[0].start_ms, w[0].end_ms), (480, 800));
+        assert_eq!(w[2].text, "আছি।");
+        assert_eq!(caption_language("bn"), Some("bn"));
+        assert_eq!(caption_language("gu"), None);
     }
 
     #[test]

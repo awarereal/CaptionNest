@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{align, dips, prompt, resync, sarvam, script, segment, vad, whisper};
+use crate::asr::{align, deepgram, dips, prompt, resync, sarvam, script, segment, vad, whisper};
+use crate::voice;
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -43,6 +44,13 @@ pub struct GenerateRequest {
     /// Online recognition (filled in from Settings by the app, never sent by the UI).
     #[serde(skip)]
     pub online: Option<sarvam::Online>,
+    /// Deepgram, when its key is saved and online recognition is on (filled in by the app).
+    #[serde(skip)]
+    pub deepgram: Option<voice::Deepgram>,
+    /// Deepgram writes the captions even where Sarvam could (Settings: online engine
+    /// "deepgram"). Otherwise Sarvam writes them and Deepgram times the words.
+    #[serde(skip)]
+    pub deepgram_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,13 +97,16 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
     }
     let spoken = (req.spoken_language != "auto").then(|| req.spoken_language.clone());
     let online = req.online.clone();
-    // Spoken languages Sarvam doesn't know still need an offline model.
-    let online_language_ok = spoken.as_deref().is_none_or(|l| sarvam::language_code(l).is_some());
+    // Spoken languages no online service knows still need an offline model. Deepgram has
+    // to be told the language, so with "detect" it needs a model to detect it.
+    let sarvam_ok = online.is_some() && spoken.as_deref().is_none_or(|l| sarvam::language_code(l).is_some());
+    let deepgram_ok = req.deepgram.is_some() && spoken.as_deref().and_then(voice::caption_language).is_some();
+    let online_language_ok = sarvam_ok || deepgram_ok;
     let offline_model = match &req.model_path_override {
         Some(p) => Ok(PathBuf::from(p)),
         None => installed_whisper(paths, &req.transcribe_model_id),
     };
-    if online.is_none() || !online_language_ok {
+    if !online_language_ok {
         if let Err(e) = &offline_model {
             return Err(e.clone());
         }
@@ -182,6 +193,33 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
 
     // Online first when set up: far fewer spelling mistakes, and fast.
     let mut online_result = None;
+    // Sarvam writes Bangla better and skips less speech (on a music-heavy vlog Deepgram
+    // left out 14 s of talking that Sarvam wrote down), so with both set up Sarvam writes
+    // and Deepgram only times the words. Deepgram writes the captions on its own where
+    // Sarvam can't, or when chosen in Settings (and the language is certain: Sarvam can
+    // detect it, Deepgram can't).
+    let sarvam_can = online.is_some() && opts.language.as_deref().is_none_or(|l| sarvam::language_code(l).is_some());
+    let deepgram_language = req
+        .deepgram
+        .as_ref()
+        .and(opts.language.as_deref())
+        .and_then(voice::caption_language)
+        .filter(|_| !sarvam_can || (req.deepgram_only && language_trusted));
+    // Deepgram can stand in if Sarvam fails.
+    let deepgram_backup = req.deepgram.is_some() && opts.language.as_deref().and_then(voice::caption_language).is_some();
+    let mut deepgram_result = None;
+    if let (Some(dg), Some(lang)) = (&req.deepgram, deepgram_language) {
+        match recognize_deepgram(&ctx, &wav, dg, lang, req.duration_ms).await {
+            Ok(r) => deepgram_result = Some(r),
+            Err(e) if e.is_cancelled() => return Err(e),
+            Err(e) if sarvam_can || offline_model.is_ok() => {
+                log::warn!("Deepgram recognition failed, trying the next engine: {e:?}");
+                warnings.push(format!("online_fallback:{}", e.message));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    let online = if deepgram_result.is_some() { None } else { online };
     // Sarvam times whole chunks; an installed offline model times the words.
     // (CAPTIONNEST_WORD_TIMING=0|sparse|all: developer override for measurements.)
     let word_timing = std::env::var("CAPTIONNEST_WORD_TIMING").unwrap_or_else(|_| "sparse".into());
@@ -197,8 +235,8 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
             Some(code) => match recognize_online(&ctx, &wav, online, code, req.duration_ms).await {
                 Ok(r) => online_result = Some(r),
                 Err(e) if e.is_cancelled() => return Err(e),
-                Err(e) if offline_model.is_ok() => {
-                    log::warn!("online recognition failed, using the offline model: {e:?}");
+                Err(e) if offline_model.is_ok() || deepgram_backup => {
+                    log::warn!("online recognition failed, using the next engine: {e:?}");
                     warnings.push(format!("online_fallback:{}", e.message));
                 }
                 Err(e) => return Err(e),
@@ -206,8 +244,55 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
             None => warnings.push("online_unsupported_language".to_string()),
         }
     }
-    let engine_used = if online_result.is_some() { Some(format!("sarvam:{}", sarvam::MODEL)) } else { specialised.clone() };
-    let (t, missed, online_cues) = match online_result {
+    // Sarvam didn't work out (no credits, no connection): Deepgram on its own before the
+    // offline models.
+    if online_result.is_none() && deepgram_result.is_none() {
+        let lang = req.deepgram.as_ref().and(opts.language.as_deref()).and_then(voice::caption_language);
+        if let (Some(dg), Some(lang)) = (&req.deepgram, lang.filter(|_| sarvam_can)) {
+            match recognize_deepgram(&ctx, &wav, dg, lang, req.duration_ms).await {
+                Ok(r) => {
+                    deepgram_result = Some(r);
+                    // Tell the user Deepgram made these captions, not the offline model.
+                    for w in &mut warnings {
+                        if let Some(why) = w.strip_prefix("online_fallback:") {
+                            *w = format!("online_fallback_deepgram:{why}");
+                        }
+                    }
+                }
+                Err(e) if e.is_cancelled() => return Err(e),
+                Err(e) if offline_model.is_ok() => {
+                    log::warn!("Deepgram recognition failed too, using the offline model: {e:?}");
+                    if !warnings.iter().any(|w| w.starts_with("online_fallback:")) {
+                        warnings.push(format!("online_fallback:{}", e.message));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    let mut engine_used = if deepgram_result.is_some() {
+        Some(format!("deepgram:{}", deepgram::MODEL))
+    } else if online_result.is_some() {
+        Some(format!("sarvam:{}", sarvam::MODEL))
+    } else {
+        specialised.clone()
+    };
+    let (t, missed, online_cues) = if let Some((t, missed)) = deepgram_result {
+        // Deepgram's word times are used as they are; caption edges only move to a
+        // speech onset or offset close by.
+        let mut seg = ctx.seg.clone();
+        seg.keep_all_words = true;
+        // Like Sarvam's captions, never across a pause of half a second or more: the
+        // words after it would show before they're spoken.
+        // (CAPTIONNEST_JOIN_PAUSE_MS: developer override for measurements.)
+        let join = std::env::var("CAPTIONNEST_JOIN_PAUSE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(sarvam::JOIN_PAUSE_MS);
+        seg.max_gap_ms = join - 100;
+        // (CAPTIONNEST_DG_SNAP_MS: developer override for measurements.)
+        seg.onset_snap_ms = std::env::var("CAPTIONNEST_DG_SNAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(DEEPGRAM_ONSET_SNAP_MS);
+        let cues = segment::segment(&t.words, &seg, Some(req.duration_ms));
+        (t, missed, Some(cues))
+    } else {
+        match online_result {
         Some((mut t, missed)) => {
             // Each chunk's text is pinned to its chunk. Where the voice fills only part
             // of a chunk (speech over music or chatter), an offline model listens to
@@ -218,7 +303,37 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
                 .filter(|p| word_timing == "all" || align::is_sparse(p, &ctx.seg.speech))
                 .map(|p| (p.start_ms, p.end_ms))
                 .collect();
+            // Deepgram, when set up, times the words: it listens to the same pieces and
+            // times every word it hears (far closer than the offline model under music).
+            let deepgram_timed = match (&req.deepgram, t.language.as_deref().or(opts.language.as_deref()).and_then(voice::caption_language)) {
+                (Some(dg), Some(lang)) => {
+                    let pieces = deepgram::merge_spans(&t.words.iter().map(|p| (p.start_ms, p.end_ms)).collect::<Vec<_>>());
+                    let started = std::time::Instant::now();
+                    let detail = Some("timing".to_string());
+                    let heard = deepgram::transcribe_spans(dg, &wav, &pieces, lang, &scratch.path().join("deepgram"), cancel, |p| {
+                        report.stage("transcribing", Some(ONLINE_SHARE + (0.97 - ONLINE_SHARE) * p), detail.clone())
+                    })
+                    .await;
+                    match heard {
+                        Ok(d) => {
+                            log::info!("Deepgram timing: {} pieces, {} words in {:.1} s", pieces.len(), d.words.len(), started.elapsed().as_secs_f32());
+                            Some(d.words)
+                        }
+                        Err(e) if e.is_cancelled() => return Err(e),
+                        Err(e) => {
+                            log::warn!("Deepgram timing failed, using the offline model: {e:?}");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+            let timed_by_deepgram = deepgram_timed.is_some();
+            if timed_by_deepgram {
+                engine_used = Some(format!("sarvam:{}+deepgram:{}", sarvam::MODEL, deepgram::MODEL));
+            }
             let timed = match timing_opts {
+                _ if timed_by_deepgram => deepgram_timed,
                 Some(mut topts) if !spans.is_empty() => {
                     topts.language = t.language.clone().or(topts.language);
                     let started = std::time::Instant::now();
@@ -247,13 +362,18 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
                 _ => None,
             };
             let phrases = std::mem::take(&mut t.words);
-            t.words = align::place_words(&phrases, timed.as_deref(), &ctx.seg.speech);
+            let timing = if timed_by_deepgram { align::Timing::Exact } else { align::Timing::Offline };
+            t.words = align::place_words_timed_by(&phrases, timed.as_deref(), &ctx.seg.speech, timing);
             debug_dump(&phrases, timed.as_deref(), &t.words);
             let mut seg = ctx.seg.clone();
             seg.keep_all_words = true;
             // Chunks end at pauses of 0.6 s or more: a caption never runs across one,
             // so the next sentence can't appear before it's spoken.
             seg.max_gap_ms = sarvam::JOIN_PAUSE_MS - 100;
+            if timed_by_deepgram {
+                // (CAPTIONNEST_DG_SNAP_MS: developer override for measurements.)
+                seg.onset_snap_ms = std::env::var("CAPTIONNEST_DG_SNAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(DEEPGRAM_ONSET_SNAP_MS);
+            }
             let mut cues = segment::segment(&t.words, &seg, Some(req.duration_ms));
             // The text is Sarvam's: if anything went missing on the way, use the plain
             // phrase captions instead of losing words.
@@ -267,6 +387,7 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
             let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
             (t, missed, None)
         }
+    }
     };
     if req.use_gpu && !t.used_gpu && online_cues.is_none() {
         warnings.push("gpu_fallback".to_string());
@@ -276,7 +397,12 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
     }
     let language = t.language.clone().or(spoken.clone()).unwrap_or_else(|| "und".into());
     let mut cues = online_cues.unwrap_or_else(|| segment::segment(&t.words, &ctx.seg, Some(req.duration_ms)));
-    snap_to_breaths(&wav, &mut cues, &ctx.seg.speech);
+    // Breath dips fix caption starts that were placed by text length. Deepgram's word
+    // times are measured, and moving the caption before to the breath stretched it
+    // over the pause (1.3-1.5 s late ends with music under the speech).
+    if !engine_used.as_deref().is_some_and(|e| e.contains("deepgram:")) {
+        snap_to_breaths(&wav, &mut cues, &ctx.seg.speech);
+    }
     if cues.is_empty() && missed.is_empty() {
         return Err(AppError::new(
             ErrorCode::NoSpeech,
@@ -541,6 +667,25 @@ fn timing_options(paths: &Paths, opts: &whisper::Options, offline: Option<&PathB
 
 /// Online recognition of the speech, one request per stretch between pauses. Returns
 /// the transcript (one phrase per chunk) and the speech spans that came back without words.
+/// How far a Deepgram caption start may move to a speech onset (see deepgram.rs).
+const DEEPGRAM_ONSET_SNAP_MS: i64 = 250;
+
+/// Online recognition with Deepgram: every word with its own time.
+async fn recognize_deepgram(ctx: &Ctx<'_>, wav: &Path, dg: &voice::Deepgram, language: &str, duration_ms: i64) -> AppResult<(whisper::Transcript, vad::Segments)> {
+    let started = std::time::Instant::now();
+    let detail = Some("online".to_string());
+    ctx.report.stage("transcribing", Some(0.0), detail.clone());
+    let total_ms = if duration_ms > 0 { duration_ms } else { crate::media::wav::read_info(wav).map(|i| i.duration_ms()).unwrap_or(0) };
+    let pieces = deepgram::plan_pieces(total_ms, &ctx.speech);
+    let t = deepgram::transcribe_spans(dg, wav, &pieces, language, &ctx.scratch.path().join("deepgram"), ctx.cancel, |p| {
+        ctx.report.stage("transcribing", Some(p * 0.97), detail.clone())
+    })
+    .await?;
+    let missed = vad::uncovered(&ctx.speech, &t.words, 300, 1_500);
+    log::info!("Deepgram recognition: {} words in {:.1} s", t.words.len(), started.elapsed().as_secs_f32());
+    Ok((t, missed))
+}
+
 async fn recognize_online(ctx: &Ctx<'_>, wav: &Path, online: &sarvam::Online, language: &str, duration_ms: i64) -> AppResult<(whisper::Transcript, vad::Segments)> {
     let share = ONLINE_SHARE;
     let started = std::time::Instant::now();

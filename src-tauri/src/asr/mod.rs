@@ -2,6 +2,7 @@
 
 pub mod align;
 pub mod prompt;
+pub mod deepgram;
 pub mod dips;
 pub mod resync;
 pub mod sarvam;

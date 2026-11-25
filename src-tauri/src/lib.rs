@@ -398,8 +398,14 @@ async fn start_generate(app: AppHandle, state: State<'_, AppState>, request: pip
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Generate);
         let mut request = request;
-        let key = state.settings.lock().unwrap().online_key();
+        let (key, online_on, engine) = {
+            let s = state.settings.lock().unwrap();
+            (s.online_key(), s.online_recognition, s.online_engine.clone())
+        };
         request.online = key.map(|key| asr::sarvam::Online::new(key, state.http.clone()));
+        // The Deepgram key saved for voice typing also works for captions.
+        request.deepgram = state.voice.get().filter(|_| online_on && engine != "sarvam").map(|key| voice::Deepgram { key, http: state.http.clone() });
+        request.deepgram_only = engine == "deepgram";
         let result = jobs::guard(pipeline::generate(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });

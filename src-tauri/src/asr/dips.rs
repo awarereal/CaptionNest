@@ -14,6 +14,7 @@
 //!   - the dip is at least `MIN_DIP_MS` long (stop consonants inside a word close the
 //!     mouth for less), and
 //!   - it is within `REACH_MS` of where the caption was placed.
+//!
 //! Among several, a longer and nearer dip wins.
 
 use std::io::{Read, Seek, SeekFrom};
@@ -65,8 +66,8 @@ pub fn frame_levels(path: &Path) -> std::io::Result<Vec<f32>> {
 fn level_db(frame: &[u8]) -> f32 {
     let mut sum = 0f64;
     let n = frame.len() / 2;
-    for s in frame.chunks_exact(2) {
-        let v = i16::from_le_bytes([s[0], s[1]]) as f64;
+    for s in frame.as_chunks::<2>().0 {
+        let v = i16::from_le_bytes(*s) as f64;
         sum += v * v;
     }
     let rms = (sum / n.max(1) as f64).sqrt();

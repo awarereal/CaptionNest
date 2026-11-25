@@ -18,8 +18,11 @@ pub struct Settings {
     pub caption_language: String,
     pub recent_projects: Vec<RecentProject>,
     pub setup_complete: bool,
-    /// Use Sarvam's online recognition when a key is set and the language is supported.
+    /// Use online recognition when a key is set and the language is supported.
     pub online_recognition: bool,
+    /// With both keys saved: "both" (Sarvam writes, Deepgram times the words), "sarvam"
+    /// (Sarvam only, saves Deepgram credits) or "deepgram" (Deepgram only).
+    pub online_engine: String,
     /// The user's Sarvam API key (kept only in this file).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sarvam_api_key: Option<String>,
@@ -47,6 +50,7 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             setup_complete: false,
             online_recognition: true,
+            online_engine: "both".into(),
             sarvam_api_key: None,
             theme: "tungsten".into(),
         }

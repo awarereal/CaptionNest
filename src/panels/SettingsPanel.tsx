@@ -25,7 +25,7 @@ import { recommendedBanglaId, recommendedModelId, sortModels } from "../lib/mode
 import type { ArgosEntry } from "../lib/types";
 import { api, toAppError } from "../lib/api";
 import { describeError } from "../lib/errors";
-import { ONLINE_LANGUAGES, SARVAM_DASHBOARD } from "../lib/online";
+import { ONLINE_LANGUAGES, SARVAM_DASHBOARD, engineSetting, hasOnlineKey, type OnlineEngine } from "../lib/online";
 import { DEFAULT_THEME, THEMES, isThemeId, type ConcreteTheme } from "../lib/theme";
 
 const SECTIONS = [
@@ -336,10 +336,27 @@ function wrapPreview(text: string, max: number): string[] {
   return lines.slice(0, 2);
 }
 
+const ENGINES: { id: OnlineEngine; name: string; desc: string }[] = [
+  {
+    id: "both",
+    name: "Sarvam writes, Deepgram times",
+    desc: "Best captions. Sarvam's words with a time for every word from Deepgram, so captions stay with the voice even over music. Uses credits from both.",
+  },
+  { id: "sarvam", name: "Sarvam only", desc: "Fewest spelling mistakes; timing is worked out between pauses. Uses only Sarvam credits." },
+  {
+    id: "deepgram",
+    name: "Deepgram only",
+    desc: "Every word timed, and cheaper. More spelling mistakes in Bangla, and it can miss speech under loud music. Uses only Deepgram credits.",
+  },
+];
+
 function OnlineSection() {
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
+  const openPanel = useStore((s) => s.openPanel);
+  const voice = useVoice((s) => s.status);
   const saved = settings?.sarvamKeyHint ?? "";
+  const engine = engineSetting(settings);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<{ kind: "idle" | "checking" | "saved" | "error"; message?: string }>({ kind: "idle" });
 
@@ -360,7 +377,8 @@ function OnlineSection() {
     <>
       <SectionHead title="Online recognition">
         Sarvam AI recognizes Bangla, Hindi, English and {ONLINE_LANGUAGES.size - 3} more Indian languages. In CaptionNest's Bangla test it made about
-        half as many spelling mistakes as the best offline model, and finished in seconds.
+        half as many spelling mistakes as the best offline model, and finished in seconds. Deepgram gives every word its own time, so captions
+        appear exactly when the words are spoken.
       </SectionHead>
 
       {saved && (
@@ -434,6 +452,59 @@ function OnlineSection() {
         </p>
       </div>
 
+      <div className="formrow formrow--gap">
+        <span className="label">Deepgram</span>
+        {voice?.keySaved ? (
+          <div className="onlinekey onlinekey--inline">
+            <CheckCircle size={18} weight="fill" />
+            <span>
+              Key saved <span className="mono onlinekey__mask">{voice.keyHint}</span>
+            </span>
+            <span className="spacer" />
+            <Button size="sm" variant="ghost" onClick={() => openPanel("settings", "voice")}>
+              Change in Voice typing
+            </Button>
+          </div>
+        ) : (
+          <button className="engine engine--hint" onClick={() => openPanel("settings", "voice")}>
+            <Microphone size={18} />
+            <span className="engine__body">
+              <span className="engine__title">Add a Deepgram key to time every word</span>
+              <span className="hint">The same key works for voice typing. Add it under Voice typing.</span>
+            </span>
+          </button>
+        )}
+      </div>
+
+      {saved && voice?.keySaved && (
+        <div className="formrow formrow--gap">
+          <span className="label" id="engine-label">
+            Use
+          </span>
+          <div className="enginechoice" role="radiogroup" aria-labelledby="engine-label">
+            {ENGINES.map((e) => {
+              const on = e.id === engine;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={`enginechoice__item ${on ? "is-on" : ""}`}
+                  onClick={() => void update({ onlineEngine: e.id })}
+                >
+                  <span className="enginechoice__dot" aria-hidden />
+                  <span className="enginechoice__text">
+                    <span className="enginechoice__name">{e.name}</span>
+                    <span className="hint">{e.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="setting-row">
         <div>
           <label className="setting-row__title" htmlFor="online-on">
@@ -444,14 +515,14 @@ function OnlineSection() {
         <Switch
           id="online-on"
           label="Use online recognition"
-          checked={!!saved && (settings?.onlineRecognition ?? true)}
+          checked={hasOnlineKey(settings, !!voice?.keySaved) && (settings?.onlineRecognition ?? true)}
           onChange={(v) => void update({ onlineRecognition: v })}
         />
       </div>
 
       <p className="hint settings__footnote">
-        Privacy: when online recognition is on, the speech in your video is sent to Sarvam AI in short pieces while captions are made. The picture
-        isn't sent. The key is stored only on this computer.
+        Privacy: when online recognition is on, the speech in your video is sent in short pieces to the services above while captions are made.
+        The picture isn't sent. The keys are stored only on this computer.
       </p>
     </>
   );
@@ -490,7 +561,8 @@ function VoiceSection() {
     <>
       <SectionHead title="Voice typing">
         Click the microphone beside a caption you're editing and speak: your words are written into the caption at the cursor. Deepgram's
-        Nova-3 model recognizes Bangla (English words you mix in are written in Bangla letters) and English.
+        Nova-3 model recognizes Bangla (English words you mix in are written in Bangla letters) and English. The same key also times captions
+        (Online recognition).
       </SectionHead>
 
       {status?.keySaved && (
