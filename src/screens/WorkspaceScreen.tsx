@@ -36,6 +36,8 @@ import { useSync } from "../state/sync";
 import { JobError, JobProgress } from "./PrepareScreen";
 import { VIDEO_EXTENSIONS } from "../lib/fileFlows";
 import { ask } from "../components/Confirm";
+import { BanglaTypingToggle } from "../components/TypingAids";
+import { useBanglaTyping } from "../components/usePhonetic";
 
 export function WorkspaceScreen() {
   const project = useStore((s) => s.project);
@@ -266,6 +268,7 @@ function CaptionsHeader({ onTranslate }: { onTranslate: () => void }) {
           Auto-sync
         </Button>
         <span className="caphead__spacer" />
+        {track?.language === "bn" && <BanglaTypingToggle />}
         <IconButton label="Undo" shortcut="Mod+Z" onClick={undo} disabled={!canUndo(history) || !!job}>
           <ArrowCounterClockwise size={18} />
         </IconButton>
@@ -536,6 +539,11 @@ function useShortcuts() {
       } else if (mod && key === "e") {
         e.preventDefault();
         startExport();
+      } else if (mod && key === "b" && !e.shiftKey && st.history.present.find((t) => t.id === st.activeTrackId)?.language === "bn") {
+        e.preventDefault();
+        useBanglaTyping.getState().toggle();
+        const on = useBanglaTyping.getState().on;
+        toast(on ? "Bangla typing on" : "Bangla typing off", { description: on ? "English letters become Bangla: ami → আমি" : "Letters stay as you type them." });
       } else if (mod && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
         e.preventDefault();
         const track = st.history.present.find((t) => t.id === st.activeTrackId);

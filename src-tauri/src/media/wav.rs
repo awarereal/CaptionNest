@@ -29,6 +29,26 @@ impl WavInfo {
     }
 }
 
+/// A 16 kHz mono 16-bit WAV of `ms` milliseconds of silence (for checking API keys).
+pub fn silence(ms: u32) -> Vec<u8> {
+    let samples = 16 * ms;
+    let mut wav = Vec::with_capacity(44 + samples as usize * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + samples * 2).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&16_000u32.to_le_bytes());
+    wav.extend_from_slice(&32_000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(samples * 2).to_le_bytes());
+    wav.resize(44 + samples as usize * 2, 0);
+    wav
+}
+
 /// Finds the format and data chunks (skipping LIST and other chunks FFmpeg may write).
 pub fn read_info(path: &Path) -> io::Result<WavInfo> {
     let mut f = File::open(path)?;

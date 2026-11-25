@@ -1,17 +1,21 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Play, Scissors, ArrowsMergeIcon, Trash, WarningCircle, Eye, Check, Clock } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
+import { VOICE_LANGUAGES, useVoice } from "../state/voice";
 import { activeIndex, overlappingIds, sortCues, wordsToCheck } from "../lib/cueOps";
 import { formatSeconds } from "../lib/time";
 import { isRtl } from "../lib/languages";
 import type { Cue } from "../lib/types";
 import { IconButton } from "./ui";
 import { TimeField } from "./TimeField";
+import { MicButton, PhoneticStrip, VoiceBar } from "./TypingAids";
+import { useBanglaTyping, usePhonetic } from "./usePhonetic";
 
 export function CueList({ cues, language }: { cues: Cue[]; language: string }) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const phonetic = useBanglaTyping((s) => s.on) && language === "bn";
   const sorted = useMemo(() => sortCues(cues), [cues]);
   const overlaps = useMemo(() => overlappingIds(sorted), [sorted]);
   const selectedId = useStore((s) => s.selectedCueId);
@@ -27,6 +31,7 @@ export function CueList({ cues, language }: { cues: Cue[]; language: string }) {
     overscan: 10,
     getItemKey: (i) => sorted[i].id,
   });
+  const items = virtualizer.getVirtualItems();
 
   // Follow playback, unless the user scrolled the list in the last few seconds.
   useEffect(() => {
@@ -60,18 +65,15 @@ export function CueList({ cues, language }: { cues: Cue[]; language: string }) {
       role="list"
       aria-label="Captions"
     >
-      <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-        {virtualizer.getVirtualItems().map((row) => {
+      <div className="cuelist__space" style={{ height: virtualizer.getTotalSize() }}>
+        {/* Rows sit in normal flow inside one shifted block, so a caption that grows
+            pushes the next one down instead of being drawn over it, even before the
+            virtualizer has re-measured it. */}
+        <div className="cuelist__rows" style={{ transform: `translateY(${items[0]?.start ?? 0}px)` }}>
+        {items.map((row) => {
           const cue = sorted[row.index];
           return (
-            <div
-              key={row.key}
-              data-index={row.index}
-              ref={virtualizer.measureElement}
-              className="cuelist__row"
-              style={{ transform: `translateY(${row.start}px)` }}
-              role="listitem"
-            >
+            <div key={row.key} data-index={row.index} ref={virtualizer.measureElement} className="cuelist__row" role="listitem">
               <CueRow
                 cue={cue}
                 index={row.index}
@@ -81,13 +83,20 @@ export function CueList({ cues, language }: { cues: Cue[]; language: string }) {
                 isLast={row.index === sorted.length - 1}
                 rtl={isRtl(language)}
                 language={language}
+                phonetic={phonetic}
               />
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );
+}
+
+function fitHeight(el: HTMLTextAreaElement) {
+  el.style.height = "0px";
+  el.style.height = `${el.scrollHeight}px`;
 }
 
 const CueRow = memo(function CueRow({
@@ -99,6 +108,7 @@ const CueRow = memo(function CueRow({
   isLast,
   rtl,
   language,
+  phonetic,
 }: {
   cue: Cue;
   index: number;
@@ -108,6 +118,8 @@ const CueRow = memo(function CueRow({
   isLast: boolean;
   rtl: boolean;
   language: string;
+  /** Latin letters typed into this caption become Bangla. */
+  phonetic: boolean;
 }) {
   const setText = useStore((s) => s.setCueText);
   const retime = useStore((s) => s.retimeCue);
@@ -118,6 +130,16 @@ const CueRow = memo(function CueRow({
   const markChecked = useStore((s) => s.markChecked);
   const markTimingChecked = useStore((s) => s.markTimingChecked);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
+  const phon = usePhonetic(textRef, phonetic, (text) => setText(cue.id, text));
+  const voiceHere = useVoice((s) => s.phase !== "idle" && s.target?.cueId === cue.id);
+  const showMic = VOICE_LANGUAGES.has(language) && (focused || voiceHere);
+  const startVoice = () => {
+    const el = textRef.current;
+    if (!el) return;
+    phon.finish();
+    void useVoice.getState().start({ cueId: cue.id, language, start: el.selectionStart, end: el.selectionEnd, text: el.value });
+  };
   const toCheck = wordsToCheck(cue);
   const selectWord = (w: string) => {
     const el = textRef.current;
@@ -131,13 +153,30 @@ const CueRow = memo(function CueRow({
   const invalid = duration <= 0;
   const empty = !cue.text.trim();
 
-  // Grow the text box with its content.
+  // Grow the text box with its content, so every line is visible.
   useLayoutEffect(() => {
+    if (textRef.current) fitHeight(textRef.current);
+  }, [cue.text]);
+
+  // Lines re-wrap when the panel is resized or a font finishes loading: fit again then.
+  useEffect(() => {
     const el = textRef.current;
     if (!el) return;
-    el.style.height = "0px";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [cue.text]);
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fitHeight(el);
+      }
+    });
+    ro.observe(el);
+    const onFonts = () => fitHeight(el);
+    document.fonts?.addEventListener("loadingdone", onFonts);
+    return () => {
+      ro.disconnect();
+      document.fonts?.removeEventListener("loadingdone", onFonts);
+    };
+  }, []);
 
   const seekHere = () => {
     const { ms, seek } = usePlayhead.getState();
@@ -175,24 +214,36 @@ const CueRow = memo(function CueRow({
             </span>
           )}
         </div>
-        <textarea
-          ref={textRef}
-          className="cue__text caption-text"
-          value={cue.text}
-          dir={rtl ? "rtl" : "auto"}
-          lang={language}
-          rows={1}
-          spellCheck={false}
-          placeholder="Type the caption…"
-          aria-label={`Caption ${index + 1} text`}
-          onChange={(e) => setText(cue.id, e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              split(cue.id, { caret: e.currentTarget.selectionStart });
-            }
-          }}
-        />
+        <div className={`cue__textwrap ${showMic ? "has-mic" : ""}`}>
+          <textarea
+            ref={textRef}
+            className="cue__text caption-text"
+            value={cue.text}
+            dir={rtl ? "rtl" : "auto"}
+            lang={language}
+            rows={1}
+            spellCheck={false}
+            placeholder={phonetic ? "Type the caption… English letters become Bangla (ami → আমি)" : "Type the caption…"}
+            aria-label={`Caption ${index + 1} text`}
+            onChange={(e) => setText(cue.id, e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              phon.finish();
+            }}
+            onMouseDown={phon.finish}
+            onKeyDown={(e) => {
+              if (phon.onKeyDown(e)) return;
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                split(cue.id, { caret: e.currentTarget.selectionStart });
+              }
+            }}
+          />
+          {showMic && <MicButton cueId={cue.id} onStart={startVoice} />}
+          {phon.comp && <PhoneticStrip comp={phon.comp} onChoose={phon.choose} />}
+        </div>
+        {voiceHere && <VoiceBar />}
         {cue.timingCheck && (
           <div className="cue__check" role="group" aria-label="Timing to check">
             <span className="cue__check-label">

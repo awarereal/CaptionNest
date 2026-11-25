@@ -387,22 +387,7 @@ async fn request(online: &Online, bytes: Vec<u8>, language: &str, cancel: &Cance
 
 /// Checks a key with one second of silence (costs a fraction of a paisa).
 pub async fn check_key(online: &Online) -> AppResult<()> {
-    let samples = 16_000u32;
-    let mut wav = Vec::with_capacity(44 + samples as usize * 2);
-    wav.extend_from_slice(b"RIFF");
-    wav.extend_from_slice(&(36 + samples * 2).to_le_bytes());
-    wav.extend_from_slice(b"WAVEfmt ");
-    wav.extend_from_slice(&16u32.to_le_bytes());
-    wav.extend_from_slice(&1u16.to_le_bytes());
-    wav.extend_from_slice(&1u16.to_le_bytes());
-    wav.extend_from_slice(&16_000u32.to_le_bytes());
-    wav.extend_from_slice(&32_000u32.to_le_bytes());
-    wav.extend_from_slice(&2u16.to_le_bytes());
-    wav.extend_from_slice(&16u16.to_le_bytes());
-    wav.extend_from_slice(b"data");
-    wav.extend_from_slice(&(samples * 2).to_le_bytes());
-    wav.resize(44 + samples as usize * 2, 0);
-    request(online, wav, "unknown", &CancellationToken::new()).await.map(|_| ())
+    request(online, wav::silence(1000), "unknown", &CancellationToken::new()).await.map(|_| ())
 }
 
 #[cfg(test)]

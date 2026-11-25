@@ -30,6 +30,9 @@
     "targets": [
       "app",
       "dmg"
-    ]
+    ],
+    "macOS": {
+      "entitlements": "Entitlements.plist"
+    }
   }
 }

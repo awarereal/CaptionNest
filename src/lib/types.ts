@@ -119,7 +119,11 @@ export type ErrorCode =
   | "internal"
   | "online_key"
   | "online_credits"
-  | "online_failed";
+  | "online_failed"
+  | "voice_key"
+  | "voice_credits"
+  | "voice_failed"
+  | "font_invalid";
 
 export interface AppError {
   code: ErrorCode;
@@ -291,4 +295,38 @@ export interface PlanInfo {
   plan: Plan | null;
   missingPackages: string[];
   needsTranslationModel: boolean;
+}
+
+/** A caption font the user added (one family, one or more files). */
+export interface UserFontFace {
+  file: string;
+  weight: number;
+  /** Upper end of the weight range for variable fonts. */
+  weightMax?: number;
+  italic: boolean;
+  /** Whether the font has Bengali letters (null when unknown). */
+  bangla: boolean | null;
+}
+
+export interface UserFont {
+  id: string;
+  name: string;
+  faces: UserFontFace[];
+}
+
+export interface FontImportResult {
+  fonts: UserFont[];
+  added: string[];
+  errors: { file: string; message: string }[];
+}
+
+/** Voice typing: whether a Deepgram key is saved (the key itself never reaches the UI). */
+export interface VoiceStatus {
+  keySaved: boolean;
+  keyHint: string | null;
+}
+
+export interface Heard {
+  text: string;
+  confidence: number;
 }

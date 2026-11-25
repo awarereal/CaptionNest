@@ -1,20 +1,69 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Check, Plus, X } from "@phosphor-icons/react";
+import { Check, Plus, Trash, WarningCircle, X } from "@phosphor-icons/react";
+import { toast } from "sonner";
 import { useActiveTrack, useStore } from "../state/store";
 import {
   CAPTION_FONTS,
+  DEFAULT_STYLE,
   MARGIN_RANGE,
   PRESETS,
   SIZE_RANGE,
   WEIGHT_NAMES,
+  allFonts,
   ensureFonts,
   fontById,
+  fontMissing,
   matchingPreset,
   nearestWeight,
+  type CaptionFont,
   type CaptionStyle,
 } from "../lib/captionStyle";
 import { drawCaption } from "../lib/renderCaption";
+import { useUserFonts } from "../lib/userFonts";
+import { pickOpenMany } from "../lib/fileFlows";
+import { toAppError } from "../lib/api";
+import { ask } from "../components/Confirm";
 import { Button, IconButton, Switch } from "../components/ui";
+
+const FONT_EXTENSIONS = ["ttf", "otf", "woff", "woff2"];
+
+/** Asks for font files, adds them, and switches captions to the new font. */
+async function addFonts(setStyle: (patch: Partial<CaptionStyle>) => void, weight: number) {
+  const paths = await pickOpenMany({ filters: [{ name: "Fonts", extensions: FONT_EXTENSIONS }], title: "Add a caption font" });
+  if (paths.length === 0) return;
+  try {
+    const result = await useUserFonts.getState().add(paths);
+    for (const e of result.errors) toast.error(`${e.file} wasn't added`, { description: e.message });
+    const id = result.added[result.added.length - 1];
+    const font = id ? allFonts().find((f) => f.id === id) : undefined;
+    if (font) {
+      setStyle({ font: font.id, weight: nearestWeight(font, weight) });
+      toast.success(`Added “${font.name}”`, {
+        description: font.bangla === false ? "This font has no Bangla letters, so Bangla captions use Anek." : "Your captions now use it.",
+      });
+    }
+  } catch (e) {
+    toast.error("The font wasn't added", { description: toAppError(e).message });
+  }
+}
+
+async function removeFont(font: CaptionFont, style: CaptionStyle, setStyle: (patch: Partial<CaptionStyle>) => void) {
+  const choice = await ask({
+    title: `Remove “${font.name}”?`,
+    message: "Captions that use it switch to Anek. The file you added from stays where it is.",
+    actions: [
+      { id: "cancel", label: "Cancel", variant: "ghost" },
+      { id: "remove", label: "Remove font", variant: "danger" },
+    ],
+  });
+  if (choice !== "remove") return;
+  try {
+    await useUserFonts.getState().remove(font.id);
+    if (style.font === font.id) setStyle({ font: DEFAULT_STYLE.font, weight: nearestWeight(CAPTION_FONTS[0], style.weight) });
+  } catch (e) {
+    toast.error("The font wasn't removed", { description: toAppError(e).message });
+  }
+}
 
 const TEXT_COLORS = ["#ffffff", "#fff4dc", "#ffe14d", "#f2bd4b", "#7cc6bc", "#14110e"];
 const LINE_COLORS = ["#000000", "#0b0907", "#ffffff", "#f2bd4b"];
@@ -42,6 +91,9 @@ export function StylePanel() {
   const sample = sampleFor(track?.language);
   const active = matchingPreset(style);
   const font = fontById(style.font);
+  // Re-render when added fonts change (the font list itself lives in captionStyle.ts).
+  useUserFonts((s) => s.version);
+  const fontsBusy = useUserFonts((s) => s.busy);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
@@ -82,22 +134,41 @@ export function StylePanel() {
         </Section>
 
         <Section title="Font">
+          {fontMissing(style.font) && (
+            <div className="fontmissing" role="status">
+              <WarningCircle size={16} weight="fill" />
+              <span>This project uses a font that was added on another computer. Captions show in Anek until you add that font here.</span>
+            </div>
+          )}
           <div className="fonts" role="radiogroup" aria-label="Font">
-            {CAPTION_FONTS.map((f) => (
-              <button
-                key={f.id}
-                role="radio"
-                aria-checked={f.id === style.font}
-                className={`fontrow ${f.id === style.font ? "is-on" : ""}`}
-                onClick={() => setStyle({ font: f.id, weight: nearestWeight(f, style.weight) })}
-              >
-                <span className="fontrow__sample" style={{ fontFamily: `${f.family}, sans-serif`, fontWeight: nearestWeight(f, 600) }}>
-                  {f.name} <span lang="bn">· বাংলা</span>
-                </span>
-                <span className="fontrow__note">{f.note}</span>
-                {f.id === style.font && <Check className="fontrow__check" size={15} weight="bold" />}
-              </button>
+            {allFonts().map((f) => (
+              <div key={f.id} className={`fontrow-wrap ${f.user ? "is-user" : ""}`}>
+                <button
+                  role="radio"
+                  aria-checked={f.id === style.font}
+                  className={`fontrow ${f.id === style.font ? "is-on" : ""}`}
+                  onClick={() => setStyle({ font: f.id, weight: nearestWeight(f, style.weight) })}
+                >
+                  <span className="fontrow__sample" style={{ fontFamily: `${f.family}, "Anek Bangla Variable", sans-serif`, fontWeight: nearestWeight(f, 600) }}>
+                    {f.name} <span lang="bn">· বাংলা</span>
+                  </span>
+                  <span className="fontrow__note">{f.user ? `Your font · ${f.note}` : f.note}</span>
+                  {f.id === style.font && <Check className="fontrow__check" size={15} weight="bold" />}
+                </button>
+                {f.user && (
+                  <IconButton label={`Remove ${f.name}`} size="sm" side="left" tone="danger" className="fontrow__remove" onClick={() => void removeFont(f, style, setStyle)}>
+                    <Trash size={14} />
+                  </IconButton>
+                )}
+              </div>
             ))}
+            <button className="fontadd" onClick={() => void addFonts(setStyle, style.weight)} disabled={fontsBusy} aria-busy={fontsBusy || undefined}>
+              <span className="fontadd__icon">{fontsBusy ? <span className="spinner" aria-hidden /> : <Plus size={16} weight="bold" />}</span>
+              <span className="fontadd__text">
+                <span className="fontadd__title">{fontsBusy ? "Adding font…" : "Add your own font"}</span>
+                <span className="fontadd__note">.ttf, .otf, .woff or .woff2 · pick Regular and Bold together for both weights</span>
+              </span>
+            </button>
           </div>
           {font.weights.length > 1 && (
             <Segmented
@@ -294,6 +365,7 @@ function Swatches({ label, colors, value, onChange }: { label: string; colors: s
 /** A small frame showing a style, drawn by the same renderer as the video. */
 function StyleSwatch({ style, text }: { style: CaptionStyle; text: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const fontsVersion = useUserFonts((s) => s.version);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -315,6 +387,6 @@ function StyleSwatch({ style, text }: { style: CaptionStyle; text: string }) {
     return () => {
       alive = false;
     };
-  }, [style, text]);
+  }, [style, text, fontsVersion]);
   return <canvas ref={ref} className="preset__frame" aria-hidden />;
 }
