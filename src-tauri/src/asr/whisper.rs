@@ -23,6 +23,9 @@ pub struct Options {
     pub word_timestamps: bool,
     /// Initial prompt (see `prompt.rs`).
     pub prompt: Option<String>,
+    /// Only the word times matter (the text comes from elsewhere): decode greedily and
+    /// never re-decode a chunk, which is much faster on noisy audio.
+    pub timing_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +202,9 @@ async fn run_batch(
         .args(["-l", opts.language.as_deref().unwrap_or("auto")]);
     if opts.word_timestamps {
         cmd.args(["-ml", "1", "-sow"]);
+    }
+    if opts.timing_only {
+        cmd.args(["-bs", "1", "-bo", "1", "-nf"]);
     }
     if opts.translate {
         cmd.arg("-tr");

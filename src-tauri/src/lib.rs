@@ -198,7 +198,7 @@ async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
     if key.is_empty() {
         return Err(AppError::new(ErrorCode::OnlineKey, "Paste your Sarvam API key first."));
     }
-    asr::sarvam::check_key(&asr::sarvam::Online { key, http: state.http.clone() }).await
+    asr::sarvam::check_key(&asr::sarvam::Online::new(key, state.http.clone())).await
 }
 
 // ---------- generation ----------
@@ -213,7 +213,7 @@ async fn start_generate(app: AppHandle, state: State<'_, AppState>, request: pip
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Generate);
         let mut request = request;
         let key = state.settings.lock().unwrap().online_key();
-        request.online = key.map(|key| asr::sarvam::Online { key, http: state.http.clone() });
+        request.online = key.map(|key| asr::sarvam::Online::new(key, state.http.clone()));
         let result = pipeline::generate(&state.paths, request, &id, &cancel, &report).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });

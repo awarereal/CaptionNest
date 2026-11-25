@@ -2,10 +2,14 @@
 //! models when the user has added a Sarvam API key.
 //!
 //! On real Bangla speech (CaptionNest's 5-minute FLEURS test) it misspelled half as many
-//! words as the best offline model (13.1% vs 26.5% WER) and took 3 seconds instead of
-//! minutes. The speech found by the VAD is sent in chunks of up to 25 seconds (Sarvam's
-//! synchronous API is meant for audio under 30 s), a few at a time. Sarvam times whole
-//! phrases, not words, so caption edges come from the VAD like everywhere else.
+//! words as the best offline model (13.4% vs 26.5% WER) and took seconds instead of
+//! minutes.
+//!
+//! Sarvam returns the text of a request with one time span for the whole request, not
+//! a time per word. So timing comes from how the audio is cut: every request is one
+//! stretch of speech between real pauses (at most 12 s), which pins its text to when
+//! it was said. Inside a chunk, words are spread over the speech; where the voice
+//! fills only part of a chunk, an offline model finds where (see `align.rs`).
 //!
 //! Only the audio of the speech chunks leaves the computer; the key stays in the app's
 //! settings file and is never logged.
@@ -25,17 +29,80 @@ use crate::media::wav;
 
 const ENDPOINT: &str = "https://api.sarvam.ai/speech-to-text";
 pub const MODEL: &str = "saaras:v4";
-/// Longest chunk of speech per request.
-pub const MAX_CHUNK_MS: i64 = 25_000;
+/// Longest chunk of speech per request. Sarvam returns one time span per request, so
+/// chunks are short and end at pauses (see `vad::plan_pause_chunks`).
+pub const MAX_CHUNK_MS: i64 = 12_000;
+/// Speech separated by a pause shorter than this is sent together.
+pub const JOIN_PAUSE_MS: i64 = 600;
+/// Requests per minute once Sarvam has refused one (the pay-as-you-go limit is 60).
+const PER_MINUTE: f64 = 54.0;
 /// Requests in flight at once (the pay-as-you-go plan allows 60 a minute).
 const PARALLEL: usize = 4;
 const ATTEMPTS: u32 = 5;
+
+/// Keeps a long video under Sarvam's per-minute request limit. Plans differ (60 to 4,000
+/// requests a minute), so requests go out freely until Sarvam first says "too many";
+/// from then on they are spaced at a steady 54 a minute.
+#[derive(Debug)]
+pub struct Pacer {
+    limited: bool,
+    tokens: f64,
+    at: std::time::Instant,
+}
+
+impl Default for Pacer {
+    fn default() -> Self {
+        Self { limited: false, tokens: 0.0, at: std::time::Instant::now() }
+    }
+}
+
+impl Pacer {
+    /// Takes a slot, or says how long to wait for one.
+    fn take(&mut self, now: std::time::Instant) -> Option<Duration> {
+        if !self.limited {
+            return None;
+        }
+        self.tokens = (self.tokens + now.duration_since(self.at).as_secs_f64() * PER_MINUTE / 60.0).min(4.0);
+        self.at = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            None
+        } else {
+            Some(Duration::from_secs_f64((1.0 - self.tokens) * 60.0 / PER_MINUTE))
+        }
+    }
+
+    /// Sarvam refused a request for coming too fast: pace from now on.
+    fn slow_down(&mut self, now: std::time::Instant) {
+        self.limited = true;
+        self.tokens = 0.0;
+        self.at = now;
+    }
+}
 
 /// The API key and HTTP client for one job. Debug output never shows the key.
 #[derive(Clone)]
 pub struct Online {
     pub key: String,
     pub http: reqwest::Client,
+    pub pacer: Arc<std::sync::Mutex<Pacer>>,
+}
+
+impl Online {
+    pub fn new(key: String, http: reqwest::Client) -> Self {
+        Self { key, http, pacer: Arc::default() }
+    }
+
+    async fn slot(&self, cancel: &CancellationToken) -> AppResult<()> {
+        loop {
+            let wait = self.pacer.lock().unwrap().take(std::time::Instant::now());
+            let Some(wait) = wait else { return Ok(()) };
+            tokio::select! {
+                _ = cancel.cancelled() => return Err(AppError::cancelled()),
+                _ = tokio::time::sleep(wait) => {}
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for Online {
@@ -246,7 +313,9 @@ fn majority(langs: &[String]) -> Option<String> {
 /// One chunk, retried with backoff when Sarvam is busy or the network blips.
 async fn request(online: &Online, bytes: Vec<u8>, language: &str, cancel: &CancellationToken) -> AppResult<Response> {
     let mut last = AppError::new(ErrorCode::Network, "Couldn't reach Sarvam. Check your internet connection and try again.");
-    for attempt in 0..ATTEMPTS {
+    let mut attempt = 0;
+    let mut limited = 0;
+    while attempt < ATTEMPTS {
         if attempt > 0 {
             let wait = Duration::from_millis(800 * 2u64.pow(attempt - 1));
             tokio::select! {
@@ -254,6 +323,7 @@ async fn request(online: &Online, bytes: Vec<u8>, language: &str, cancel: &Cance
                 _ = tokio::time::sleep(wait) => {}
             }
         }
+        online.slot(cancel).await?;
         let part = reqwest::multipart::Part::bytes(bytes.clone())
             .file_name("speech.wav")
             .mime_str("audio/wav")
@@ -276,6 +346,7 @@ async fn request(online: &Online, bytes: Vec<u8>, language: &str, cancel: &Cance
             Ok(r) => r,
             Err(e) => {
                 last = last.clone().with_detail(e.to_string());
+                attempt += 1;
                 continue;
             }
         };
@@ -295,8 +366,16 @@ async fn request(online: &Online, bytes: Vec<u8>, language: &str, cancel: &Cance
             (_, "invalid_api_key_error" | "authentication_error") | (401 | 403, _) => {
                 return Err(AppError::new(ErrorCode::OnlineKey, "Sarvam didn't accept the API key. Check it in Settings → Online recognition.").with_detail(detail));
             }
+            (429, _) if limited < 40 => {
+                // Over the per-minute limit: pace from here on; this isn't a failure.
+                limited += 1;
+                online.pacer.lock().unwrap().slow_down(std::time::Instant::now());
+                last = AppError::new(ErrorCode::OnlineFailed, "Sarvam is busy right now. Try again in a minute.").with_detail(detail);
+                continue;
+            }
             (429 | 500 | 502 | 503 | 504, _) => {
                 last = AppError::new(ErrorCode::OnlineFailed, "Sarvam is busy right now. Try again in a minute.").with_detail(detail);
+                attempt += 1;
             }
             _ => {
                 return Err(AppError::new(ErrorCode::OnlineFailed, "Sarvam couldn't process this audio.").with_detail(detail));
@@ -364,6 +443,18 @@ mod tests {
         assert_eq!(localize("সর্বনিম্ন গ্রেডে ₹17,000। আর সর্বোচ্চ ₹21,500, তবে", "bn"), "সর্বনিম্ন গ্রেডে ১৭,০০০ টাকা। আর সর্বোচ্চ ২১,৫০০ টাকা, তবে");
         assert_eq!(localize("অন্তত 10টি কারখানায় 4,00,000", "bn"), "অন্তত ১০টি কারখানায় ৪,০০,০০০");
         assert_eq!(localize("₹500 कीमत", "hi"), "₹500 कीमत");
+    }
+
+    #[test]
+    fn requests_are_paced_only_after_sarvam_says_too_many() {
+        let mut p = Pacer::default();
+        let t0 = std::time::Instant::now();
+        assert!((0..500).all(|_| p.take(t0).is_none()));
+        p.slow_down(t0);
+        let wait = p.take(t0).expect("right after a refusal the next request waits");
+        assert!(wait > Duration::from_millis(900) && wait < Duration::from_millis(1300), "{wait:?}");
+        assert!(p.take(t0 + Duration::from_secs(2)).is_none());
+        assert!(p.take(t0 + Duration::from_secs(2)).is_some());
     }
 
     #[test]

@@ -25,11 +25,14 @@ pub struct Options {
     /// Speech regions (unpadded VAD), used to put caption edges exactly where speech
     /// starts and stops. Empty = word times only.
     pub speech: Vec<(i64, i64)>,
+    /// The words are a finished transcript (online recognition): keep every one. Off for
+    /// Whisper output, where instant duplicates and loops are removed.
+    pub keep_all_words: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 150, speech: Vec::new() }
+        Self { max_line_chars: 42, max_lines: 2, max_duration_ms: 6_000, min_duration_ms: 800, max_gap_ms: 800, linger_ms: 150, speech: Vec::new(), keep_all_words: false }
     }
 }
 
@@ -37,7 +40,7 @@ const SENTENCE_END: &[char] = &['.', '?', '!', '।', '॥', '؟', '۔', '。', 
 const CLAUSE_END: &[char] = &[',', ';', ':', '،', '؛', '、', '，', '；'];
 
 pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec<Cue> {
-    let words = clean(words);
+    let words = if opts.keep_all_words { words.iter().filter(|w| !w.text.trim().is_empty()).cloned().collect() } else { clean(words) };
     let mut groups: Vec<Vec<&Word>> = Vec::new();
     let mut cur: Vec<&Word> = Vec::new();
 
@@ -629,6 +632,17 @@ mod tests {
         let pieces = split_text("মার্কিন যুক্তরাষ্ট্র জুড়ে প্রায় 4,00,000 সংখ্যক মাল্টিপল স্ক্লেরোসিসের ঘটনা রয়েছে", 30);
         assert!(pieces.iter().all(|p| !p.ends_with(',') && !p.starts_with('0')), "{pieces:?}");
         assert!(pieces.iter().any(|p| p.contains("4,00,000")), "{pieces:?}");
+    }
+
+    #[test]
+    fn a_finished_transcript_keeps_every_word() {
+        // Squeezed, repeated words that Whisper cleaning would drop as loops.
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: format!(" {t}") };
+        let words = vec![w(1_000, 1_400, "এই।"), w(1_400, 1_401, "এই।"), w(1_401, 1_402, "এই।"), w(1_402, 1_403, "এই।"), w(1_403, 1_404, "এই।"), w(1_404, 2_000, "চলো।")];
+        let opts = Options { keep_all_words: true, ..Default::default() };
+        let joined: String = segment(&words, &opts, None).iter().map(|c| c.text.replace('\n', " ")).collect::<Vec<_>>().join(" ");
+        assert_eq!(joined, "এই। এই। এই। এই। এই। চলো।");
+        assert_ne!(segment(&words, &Options::default(), None).iter().map(|c| c.text.clone()).collect::<Vec<_>>().join(" "), joined);
     }
 
     #[test]

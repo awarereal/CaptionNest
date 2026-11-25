@@ -67,7 +67,7 @@ pub async fn run(app: &AppHandle, t: SelfTest) -> i32 {
             use_language_models: Some(false),
             model_path_override: Some(t.model.to_string_lossy().into_owned()),
             online: if t.online {
-                std::env::var("SARVAM_API_KEY").ok().map(|key| crate::asr::sarvam::Online { key, http: state.http.clone() })
+                std::env::var("SARVAM_API_KEY").ok().map(|key| crate::asr::sarvam::Online::new(key, state.http.clone()))
             } else {
                 None
             },

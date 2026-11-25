@@ -34,6 +34,27 @@ runs it (speech chunks up to 25 s): **13.1% WER, 4.0% CER**, 3 seconds for the w
 offline model garbled them. Sarvam writes money as "₹17,000"; CaptionNest rewrites it as
 "১৭,০০০ টাকা" and uses Bengali digits in Bangla captions.
 
+**Timing of online captions.** Sarvam gives one time span per request, so captions are
+only as well timed as the audio is cut. Requests of up to 25 s that ran across pauses put
+captions seconds early or late on a travel vlog (voice over music, several speakers).
+Now every request is one stretch of speech between pauses (≤ 12 s), a caption never runs
+across a pause of 0.5 s or more, and where the voice fills only part of a chunk an
+installed offline model locates the words in it. Measured with
+`scripts/bench/cue_window_check.py` (each caption's own time window is recognized again
+on its own; the score is the share of the caption's letters heard in that window) and
+`scripts/bench/srt_truth_check.py` (known sentence times):
+
+| Video | Before | Now |
+|---|---|---|
+| Travel vlog, 4 min (music, chatter, 3+ speakers) | 0.68 | **0.83** |
+| TV news, 2.5 min (continuous speech) | 0.96 | 0.96 |
+| Read speech with known times, 5 min | — | 55 of 56 captions inside their sentence's true span (−0.3 / +0.5 s); the 56th is a scoring artifact |
+
+Text accuracy is unchanged by the finer cut (13.4% WER on the 5-minute test, with digits
+compared like-for-like). A 12-minute vlog takes 33 s. What stays hard: two voices at
+once with no pause between them (the caption covers the whole stretch), and background
+chatter that even a second listen transcribes differently.
+
 Decisions that followed:
 - The Bangla-trained models cut spelling errors by more than half, so Bangla speech is
   transcribed with them automatically when one is installed. **Bangla Max** is
