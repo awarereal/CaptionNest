@@ -8,7 +8,9 @@ size, takes a snapshot of each, and checks the layout automatically:
   - images and icons with zero size,
   - console errors.
 
-usage: ui_audit.py [label]   (app running with the automation bridge)
+usage: ui_audit.py [label] [theme] [sizes]   (app running with the automation bridge)
+  theme: a theme id from src/lib/theme.ts (default: leave as is)
+  sizes: e.g. "1360x860,900x600" (the default)
 Writes build/shots/audit/<label>-<state>.png and build/bench/ui-audit-<label>.json.
 """
 import json
@@ -22,6 +24,8 @@ import ui  # noqa: E402
 
 ROOT = flow.ROOT
 LABEL = sys.argv[1] if len(sys.argv) > 1 else "audit"
+THEME = sys.argv[2] if len(sys.argv) > 2 else None
+SIZE_ARG = sys.argv[3] if len(sys.argv) > 3 else "1360x860,900x600"
 SHOTS = os.path.join(ROOT, "build", "shots", "audit")
 os.makedirs(SHOTS, exist_ok=True)
 
@@ -184,7 +188,10 @@ def close_layers():
     ui.eval_js("window.__CN_STORE__.getState().openPanel(null); return true")
 
 
-SIZES = [(1360, 860), (900, 600)]
+SIZES = [tuple(int(n) for n in s.split("x")) for s in SIZE_ARG.split(",")]
+if THEME:
+    ui.eval_js(f'window.__CN_STORE__.getState().updateSettings({{ theme: "{THEME}" }}); return true')
+    time.sleep(0.6)
 video = os.path.join(ROOT, "build", "testmedia", "বাংলা নমুনা (Bangla sample).mp4")
 
 for w, h in SIZES:
@@ -195,7 +202,7 @@ for w, h in SIZES:
     check("home", size)
 
     # Settings: every section.
-    for section in ["models", "online", "voice", "languages", "captions", "processing", "storage", "about"]:
+    for section in ["models", "online", "voice", "languages", "captions", "appearance", "processing", "storage", "about"]:
         ui.eval_js(f'window.__CN_STORE__.getState().openPanel("settings", "{section}"); return true')
         time.sleep(0.4)
         check(f"settings-{section}", size)

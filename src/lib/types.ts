@@ -253,6 +253,8 @@ export interface Settings {
   onlineRecognition: boolean;
   /** "sk_ab…9lnQ" when a Sarvam key is saved (the key itself stays in Rust). */
   sarvamKeyHint?: string | null;
+  /** Interface theme id (lib/theme.ts). */
+  theme: string;
 }
 
 export interface RecentProject {

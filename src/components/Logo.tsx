@@ -18,8 +18,9 @@ export function LogoMark({ size = 28, title }: { size?: number; title?: string }
           <stop offset="1" stopColor="#D9952C" />
         </linearGradient>
         <linearGradient id="lm-strand" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#F6EFDF" />
-          <stop offset="1" stopColor="#D9CDB5" />
+          {/* Strands follow the theme (dark on the light theme); the gold egg never changes. */}
+          <stop offset="0" style={{ stopColor: "var(--logo-strand-top, #F6EFDF)" }} />
+          <stop offset="1" style={{ stopColor: "var(--logo-strand-bottom, #D9CDB5)" }} />
         </linearGradient>
       </defs>
       <path

@@ -73,7 +73,7 @@ p {
 }
 
 ::selection {
-  background: rgb(242 189 75 / 0.35);
+  background: color-mix(in srgb, var(--gold) 35%, transparent);
   color: var(--paper);
 }
 
