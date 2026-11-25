@@ -9,7 +9,7 @@ use super::Word;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::media::{process, wav};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     pub model: PathBuf,
     /// `None` = detect automatically.
@@ -424,7 +424,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let model = dir.path().join("model.bin");
         std::fs::write(&model, b"x").unwrap();
-        let opts = Options { model, language: Some("bn".into()), translate: false, use_gpu: false, threads: 4, word_timestamps: true, prompt: None };
+        let opts = Options { model, language: Some("bn".into()), threads: 4, word_timestamps: true, ..Default::default() };
         let t = transcribe_spans(Path::new("whisper-cli"), &dir.path().join("none.wav"), &[], dir.path(), &opts, &CancellationToken::new(), |_| {})
             .await
             .unwrap();
