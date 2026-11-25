@@ -16,6 +16,8 @@ import {
   Metronome,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { SARVAM_DASHBOARD } from "../lib/online";
 import { useActiveTrack, useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
 import { Player } from "../components/Player";
@@ -62,6 +64,20 @@ export function WorkspaceScreen() {
             Graphics acceleration wasn't available, so this run used the processor. Results are the same; it just took longer.
           </Banner>
         )}
+        {warnings.includes("online_credits_deepgram") && (
+          <Banner
+            tone="gold"
+            onClose={() => useStore.setState({ warnings: warnings.filter((w) => w !== "online_credits_deepgram") })}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => void openUrl(SARVAM_DASHBOARD)}>
+                Add credits
+              </Button>
+            }
+          >
+            Your Sarvam credits ran out, so Deepgram wrote these captions. Its Bangla has a few more spelling mistakes. Add credits at
+            dashboard.sarvam.ai, then generate again for Sarvam's text.
+          </Banner>
+        )}
         {warnings.some((w) => w.startsWith("online_fallback_deepgram:")) && (
           <Banner
             tone="gold"
@@ -72,8 +88,8 @@ export function WorkspaceScreen() {
               </Button>
             }
           >
-            Sarvam didn't work this time ({warnings.find((w) => w.startsWith("online_fallback_deepgram:"))!.slice("online_fallback_deepgram:".length)}), so
-            these captions were made with Deepgram.
+            Sarvam didn't work this time, so Deepgram wrote these captions (a few more spelling mistakes in Bangla). Sarvam said:{" "}
+            {warnings.find((w) => w.startsWith("online_fallback_deepgram:"))!.slice("online_fallback_deepgram:".length)}
           </Banner>
         )}
         {warnings.some((w) => w.startsWith("online_fallback:")) && (

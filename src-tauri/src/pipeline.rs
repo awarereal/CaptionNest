@@ -208,6 +208,8 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
     // Deepgram can stand in if Sarvam fails.
     let deepgram_backup = req.deepgram.is_some() && opts.language.as_deref().and_then(voice::caption_language).is_some();
     let mut deepgram_result = None;
+    // Sarvam said its credits ran out (the editor says so if Deepgram writes instead).
+    let mut sarvam_out_of_credits = false;
     if let (Some(dg), Some(lang)) = (&req.deepgram, deepgram_language) {
         match recognize_deepgram(&ctx, &wav, dg, lang, req.duration_ms).await {
             Ok(r) => deepgram_result = Some(r),
@@ -237,6 +239,7 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
                 Err(e) if e.is_cancelled() => return Err(e),
                 Err(e) if offline_model.is_ok() || deepgram_backup => {
                     log::warn!("online recognition failed, using the next engine: {e:?}");
+                    sarvam_out_of_credits = e.code == ErrorCode::OnlineCredits;
                     warnings.push(format!("online_fallback:{}", e.message));
                 }
                 Err(e) => return Err(e),
@@ -252,10 +255,11 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
             match recognize_deepgram(&ctx, &wav, dg, lang, req.duration_ms).await {
                 Ok(r) => {
                     deepgram_result = Some(r);
-                    // Tell the user Deepgram made these captions, not the offline model.
+                    // Tell the user Deepgram made these captions, not the offline model, and
+                    // why: its Bangla has a few more spelling mistakes than Sarvam's.
                     for w in &mut warnings {
                         if let Some(why) = w.strip_prefix("online_fallback:") {
-                            *w = format!("online_fallback_deepgram:{why}");
+                            *w = if sarvam_out_of_credits { "online_credits_deepgram".to_string() } else { format!("online_fallback_deepgram:{why}") };
                         }
                     }
                 }
