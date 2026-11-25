@@ -76,16 +76,15 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
         .collect();
     let inner: Vec<Inner> = groups
         .iter()
-        .map(|g| Inner { second_start: g.get(1).map(|w| w.start_ms), last_start: g[g.len() - 1].start_ms })
+        .map(|g| Inner { last_start: g[g.len() - 1].start_ms })
         .collect();
     align_to_speech(&mut cues, &inner, &opts.speech);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
 }
 
-/// Word starts inside a cue, which its edges must not cross when snapped.
+/// Where a cue's last word starts: its end must not be snapped before that.
 struct Inner {
-    second_start: Option<i64>,
     last_start: i64,
 }
 
@@ -105,8 +104,9 @@ fn align_to_speech(cues: &mut [Cue], inner: &[Inner], speech: &[(i64, i64)]) {
     let mut prev_end = i64::MIN;
     for i in 0..cues.len() {
         let (a, b) = raw[i];
-        let hi = inner.get(i).and_then(|w| w.second_start).map_or(a + 400, |s| (a + 400).min(s - 100));
-        if let Some(o) = nearest(&onsets, a, a - 600, hi).filter(|&o| o >= prev_end) {
+        // Whisper's own word times bunch up early at the start of a chunk, so the
+        // speech onset is trusted within 0.6 s either way.
+        if let Some(o) = nearest(&onsets, a, a - 600, (a + 600).min(b - 200)).filter(|&o| o >= prev_end) {
             cues[i].start_ms = o;
         }
         let next_start = raw.get(i + 1).map_or(i64::MAX, |r| r.0);
@@ -274,7 +274,7 @@ pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64
             at = end;
         }
     }
-    let inner: Vec<Inner> = cues.iter().map(|c| Inner { second_start: None, last_start: c.start_ms }).collect();
+    let inner: Vec<Inner> = cues.iter().map(|c| Inner { last_start: c.start_ms }).collect();
     align_to_speech(&mut cues, &inner, &opts.speech);
     fix_timing(&mut cues, opts, media_end_ms);
     cues
@@ -567,6 +567,16 @@ mod tests {
         assert_eq!(cues.len(), 2);
         assert_eq!((cues[0].start_ms, cues[0].end_ms), (700, 6_620 + opts.linger_ms));
         assert_eq!((cues[1].start_ms, cues[1].end_ms), (10_370, 12_300 + opts.linger_ms));
+    }
+
+    #[test]
+    fn start_snaps_even_when_whisper_bunches_words_early() {
+        // Whisper put the first two words before the voice starts (330-600 ms).
+        let w = |s, e, t: &str| Word { confidence: 1.0, start_ms: s, end_ms: e, text: format!(" {t}") };
+        let words = vec![w(330, 450, "এটিকে"), w(450, 600, "মঙ্গলবার"), w(1_200, 2_900, "কেটে।")];
+        let opts = Options { speech: vec![(700, 2_800)], ..Default::default() };
+        let cues = segment(&words, &opts, None);
+        assert_eq!(cues[0].start_ms, 700, "{cues:?}");
     }
 
     #[test]

@@ -199,12 +199,6 @@ async fn run_batch(
         .args(["-l", opts.language.as_deref().unwrap_or("auto")]);
     if opts.word_timestamps {
         cmd.args(["-ml", "1", "-sow"]);
-        // Token alignment from the attention weights (DTW) places words within a few
-        // hundredths of a second, where Whisper's own word times drift by 0.3-0.6 s at
-        // the edges of speech. DTW is skipped when flash attention is on, so turn that off.
-        if let Some(preset) = dtw_preset(&opts.model) {
-            cmd.args(["-dtw", preset, "-nfa"]);
-        }
     }
     if opts.translate {
         cmd.arg("-tr");
@@ -254,27 +248,6 @@ async fn run_batch(
     Ok(())
 }
 
-/// whisper.cpp's alignment-head preset for a model file, from its name. Fine-tuned
-/// models (e.g. the Bangla ones) share the architecture, and so the heads, of their base.
-pub fn dtw_preset(model: &Path) -> Option<&'static str> {
-    let name = model.file_name()?.to_string_lossy().to_ascii_lowercase();
-    let presets = [
-        ("large-v3-turbo", "large.v3.turbo"),
-        ("large-v3", "large.v3"),
-        ("large-v2", "large.v2"),
-        ("large-v1", "large.v1"),
-        ("medium.en", "medium.en"),
-        ("medium", "medium"),
-        ("small.en", "small.en"),
-        ("small", "small"),
-        ("base.en", "base.en"),
-        ("base", "base"),
-        ("tiny.en", "tiny.en"),
-        ("tiny", "tiny"),
-    ];
-    presets.iter().find(|(key, _)| name.contains(key)).map(|(_, p)| *p)
-}
-
 /// Splits `[start, end)` into windows of at most `max_ms` (used when no voice activity
 /// information is available).
 pub fn fixed_windows(start: i64, end: i64, max_ms: i64) -> Vec<(i64, i64)> {
@@ -291,37 +264,48 @@ pub fn fixed_windows(start: i64, end: i64, max_ms: i64) -> Vec<(i64, i64)> {
 /// Detects the spoken language from the first 30 seconds of speech (one encoder pass).
 /// Returns the language and Whisper's probability, or None when detection failed (the
 /// main pass then detects on its own).
-pub async fn detect_language(
+/// Detects the spoken language at several points (30 s each) in one whisper-cli run,
+/// so the model loads once instead of once per point. Returns one (language,
+/// probability) per point that produced an answer.
+pub async fn detect_languages(
     whisper_cli: &Path,
     wav: &Path,
     opts: &Options,
-    start_ms: i64,
+    starts_ms: &[i64],
+    work_dir: &Path,
     cancel: &CancellationToken,
-) -> AppResult<Option<(String, f32)>> {
+) -> AppResult<Vec<(String, f32)>> {
+    std::fs::create_dir_all(work_dir)?;
+    let info = wav::read_info(wav).map_err(|e| AppError::new(ErrorCode::ToolFailed, "The prepared audio couldn't be read.").with_detail(e.to_string()))?;
+    let mut names = Vec::new();
+    for (i, &start) in starts_ms.iter().enumerate() {
+        let name = format!("detect-{i}.wav");
+        wav::write_slice(wav, &info, start, start + 30_000, &work_dir.join(&name))?;
+        names.push(name);
+    }
     let run = |gpu: bool| {
         let mut cmd = process::command(whisper_cli);
-        cmd.arg("-m").arg(&opts.model).arg("-f").arg(wav).args(["-dl", "-l", "auto"])
-            .args(["-t", &opts.threads.to_string()]);
-        if start_ms > 0 {
-            // Listen from the first speech, not from leading music or silence.
-            cmd.args(["-ot", &start_ms.to_string()]);
-        }
+        cmd.current_dir(work_dir);
+        cmd.arg("-m").arg(&opts.model).args(["-dl", "-l", "auto", "-t", &opts.threads.to_string()]);
         if !gpu {
             cmd.arg("-ng");
         }
+        for n in &names {
+            cmd.arg("-f").arg(n);
+        }
         cmd
     };
-    let mut found = None;
+    let mut found = Vec::new();
     let out = process::run_streaming(run(opts.use_gpu), cancel, false, |_| {}, |l| {
         if let Some(d) = parse_detection(l) {
-            found = Some(d);
+            found.push(d);
         }
     })
     .await?;
-    if found.is_none() && !out.status.success() && opts.use_gpu {
+    if found.is_empty() && !out.status.success() && opts.use_gpu {
         process::run_streaming(run(false), cancel, false, |_| {}, |l| {
             if let Some(d) = parse_detection(l) {
-                found = Some(d);
+                found.push(d);
             }
         })
         .await?;
@@ -375,25 +359,10 @@ struct RawToken {
     text: String,
     #[serde(default = "one")]
     p: f32,
-    /// DTW-aligned time of the token in centiseconds; -1 when not computed.
-    #[serde(default = "minus_one")]
-    t_dtw: i64,
 }
 
 fn one() -> f32 {
     1.0
-}
-
-fn minus_one() -> i64 {
-    -1
-}
-
-/// DTW start of a word: the aligned time of its first token that carries text.
-fn dtw_start_ms(tokens: &[RawToken], from: i64, to: i64) -> Option<i64> {
-    let t = tokens.iter().find(|t| !t.text.starts_with("[_") && !t.text.trim().is_empty())?;
-    let ms = t.t_dtw * 10;
-    // Ignore alignments that land far outside Whisper's own estimate for the word.
-    (t.t_dtw >= 0 && ms >= from - 1_000 && ms <= to + 500).then_some(ms)
 }
 
 /// Lowest probability among the tokens that carry letters (special tokens such as
@@ -423,8 +392,7 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
     let raw: RawOutput = serde_json::from_str(&text).map_err(|e| {
         AppError::new(ErrorCode::ToolFailed, "Speech recognition produced unreadable results.").with_detail(e.to_string())
     })?;
-    let mut dtw: Vec<Option<i64>> = Vec::new();
-    let mut words: Vec<Word> = raw
+    let words: Vec<Word> = raw
         .transcription
         .into_iter()
         .filter_map(|s| {
@@ -432,11 +400,9 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
             if cleaned.trim().is_empty() {
                 return None;
             }
-            dtw.push(dtw_start_ms(&s.tokens, s.offsets.from, s.offsets.to));
             Some(Word { confidence: word_confidence(&s.tokens), start_ms: s.offsets.from.max(0), end_ms: s.offsets.to.max(s.offsets.from), text: cleaned })
         })
         .collect();
-    apply_dtw(&mut words, &dtw);
     Ok(Transcript {
         words,
         language: raw.result.and_then(|r| r.language),
@@ -445,58 +411,9 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
     })
 }
 
-/// Moves word starts to their DTW-aligned times. A word then ends where the next one
-/// starts, or earlier if Whisper heard it end earlier (a pause).
-fn apply_dtw(words: &mut [Word], dtw: &[Option<i64>]) {
-    if dtw.iter().all(Option::is_none) {
-        return;
-    }
-    let mut prev = 0;
-    for (w, d) in words.iter_mut().zip(dtw) {
-        if let Some(ms) = d {
-            w.start_ms = (*ms).max(prev).max(0);
-        }
-        prev = w.start_ms;
-    }
-    for i in 0..words.len() {
-        let next = words.get(i + 1).map(|n| n.start_ms);
-        let w = &mut words[i];
-        let heard_end = w.end_ms;
-        w.end_ms = match next {
-            Some(n) if heard_end > w.start_ms + 30 => heard_end.min(n),
-            Some(n) => n,
-            None => heard_end,
-        }
-        .max(w.start_ms + 30);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dtw_moves_word_starts_and_keeps_pauses() {
-        let json = br#"{"result":{"language":"bn"},"transcription":[
-          {"offsets":{"from":0,"to":490},"text":"a","tokens":[{"text":"[_BEG_]","p":1,"t_dtw":-1},{"text":"a","p":0.9,"t_dtw":78}]},
-          {"offsets":{"from":490,"to":1280},"text":" bb","tokens":[{"text":" ","p":1,"t_dtw":120},{"text":"bb","p":0.9,"t_dtw":120}]},
-          {"offsets":{"from":1280,"to":1500},"text":" c","tokens":[{"text":" c","p":0.9,"t_dtw":190}]},
-          {"offsets":{"from":3000,"to":3600},"text":" d","tokens":[{"text":" d","p":0.9,"t_dtw":320}]}]}"#;
-        let t = parse_json(json).unwrap();
-        let s: Vec<(i64, i64)> = t.words.iter().map(|w| (w.start_ms, w.end_ms)).collect();
-        // Starts come from DTW. A word ends where the next starts unless Whisper heard it end
-        // earlier: "bb" ends at 1280. "c" was heard ending at 1500, before its DTW start,
-        // so it runs to the next word.
-        assert_eq!(s, vec![(780, 1200), (1200, 1280), (1900, 3200), (3200, 3600)]);
-    }
-
-    #[test]
-    fn dtw_presets_follow_the_model_file() {
-        assert_eq!(dtw_preset(Path::new("/m/ggml-large-v3-turbo-bn-q5_0.bin")), Some("large.v3.turbo"));
-        assert_eq!(dtw_preset(Path::new("/m/ggml-large-v3-q5_0.bin")), Some("large.v3"));
-        assert_eq!(dtw_preset(Path::new("/m/ggml-small.bin")), Some("small"));
-        assert_eq!(dtw_preset(Path::new("/m/custom.bin")), None);
-    }
 
     #[test]
     fn parses_real_bangla_word_output() {

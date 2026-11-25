@@ -123,12 +123,8 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         }
         // Listen at up to three places (start, middle, later) and vote, so a music
         // intro or a short greeting in another language can't decide on its own.
-        let mut votes = Vec::new();
-        for at in detection_points(&speech, first_speech) {
-            if let Some(v) = whisper::detect_language(&paths.tool("whisper-cli")?, &wav, &detect_opts, at, cancel).await? {
-                votes.push(v);
-            }
-        }
+        let points = detection_points(&speech, first_speech);
+        let votes = whisper::detect_languages(&paths.tool("whisper-cli")?, &wav, &detect_opts, &points, &scratch.path().join("detect"), cancel).await?;
         if let Some((lang, confidence)) = vote_language(&votes) {
             if confidence < 0.5 {
                 uncertain = Some(format!("language_uncertain:{lang}:{confidence:.2}"));

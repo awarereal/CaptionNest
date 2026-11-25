@@ -31,3 +31,6 @@ dist-ssr
 /release/
 __pycache__/
 *.tsbuildinfo
+
+# Local secrets (API keys)
+.env
