@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Waveform, Translate, TextAa, Cpu, HardDrives, Info, MagnifyingGlass, DownloadSimple, Trash, CheckCircle } from "@phosphor-icons/react";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { Waveform, Translate, TextAa, Cpu, HardDrives, Info, MagnifyingGlass, DownloadSimple, Trash, CheckCircle, Globe, WarningCircle } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { ModelCard, DownloadStatus } from "../components/ModelCard";
 import { Button, Modal, Switch, formatBytes } from "../components/ui";
 import { language } from "../lib/languages";
 import { recommendedBanglaId, recommendedModelId, sortModels } from "../lib/models";
 import type { ArgosEntry } from "../lib/types";
+import { api, toAppError } from "../lib/api";
+import { describeError } from "../lib/errors";
+import { ONLINE_LANGUAGES, SARVAM_DASHBOARD, maskKey } from "../lib/online";
 
 const SECTIONS = [
   { id: "models", label: "Speech models", icon: Waveform },
+  { id: "online", label: "Online recognition", icon: Globe },
   { id: "languages", label: "Language packs", icon: Translate },
   { id: "captions", label: "Caption layout", icon: TextAa },
   { id: "processing", label: "Processing", icon: Cpu },
@@ -43,6 +47,7 @@ export function SettingsPanel() {
         </nav>
         <div className="settings__content">
           {active === "models" && <ModelsSection />}
+          {active === "online" && <OnlineSection />}
           {active === "languages" && <LanguagesSection />}
           {active === "captions" && <CaptionsSection />}
           {active === "processing" && <ProcessingSection />}
@@ -238,13 +243,132 @@ function wrapPreview(text: string, max: number): string[] {
   return lines.slice(0, 2);
 }
 
+function OnlineSection() {
+  const settings = useStore((s) => s.settings);
+  const update = useStore((s) => s.updateSettings);
+  const saved = settings?.sarvamApiKey?.trim() ?? "";
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState<{ kind: "idle" | "checking" | "saved" | "error"; message?: string }>({ kind: "idle" });
+
+  const save = async () => {
+    const key = draft.trim();
+    if (!key) return;
+    setStatus({ kind: "checking" });
+    try {
+      await api.checkOnlineKey(key);
+      await update({ sarvamApiKey: key, onlineRecognition: true });
+      setDraft("");
+      setStatus({ kind: "saved" });
+    } catch (e) {
+      setStatus({ kind: "error", message: describeError(toAppError(e)).message });
+    }
+  };
+
+  return (
+    <>
+      <SectionHead title="Online recognition">
+        Sarvam AI recognizes Bangla, Hindi, English and {ONLINE_LANGUAGES.size - 3} more Indian languages. In CaptionNest's Bangla test it made about
+        half as many spelling mistakes as the best offline model, and finished in seconds.
+      </SectionHead>
+
+      {saved && (
+        <div className="onlinekey">
+          <CheckCircle size={18} weight="fill" />
+          <span>
+            Key saved <span className="mono onlinekey__mask">{maskKey(saved)}</span>
+          </span>
+          <span className="spacer" />
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Trash size={15} />}
+            onClick={() => {
+              setStatus({ kind: "idle" });
+              void update({ sarvamApiKey: null });
+            }}
+          >
+            Remove key
+          </Button>
+        </div>
+      )}
+
+      <div className="formrow">
+        <label className="label" htmlFor="sarvam-key">
+          {saved ? "Replace the key" : "Sarvam API key"}
+        </label>
+        <form
+          className="onlinekey__row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <input
+            id="sarvam-key"
+            className="field mono"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="sk_…"
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (status.kind !== "checking") setStatus({ kind: "idle" });
+            }}
+          />
+          <Button type="submit" variant="primary" busy={status.kind === "checking"} disabled={!draft.trim()}>
+            Check and save
+          </Button>
+        </form>
+        {status.kind === "saved" && (
+          <p className="formrow__note onlinekey__ok">
+            <CheckCircle size={14} weight="fill" /> Sarvam accepted the key. New captions are recognized online.
+          </p>
+        )}
+        {status.kind === "error" && (
+          <p className="formrow__note formrow__note--warn" role="alert">
+            <WarningCircle size={14} /> {status.message}
+          </p>
+        )}
+        <p className="hint">
+          Get a key at{" "}
+          <button className="btn btn--quiet linkish" onClick={() => void openUrl(SARVAM_DASHBOARD)}>
+            dashboard.sarvam.ai
+          </button>
+          . New accounts get free credits; after that it costs about ₹30 per hour of speech (about ₹5 for a 10-minute video).
+        </p>
+      </div>
+
+      <div className="setting-row">
+        <div>
+          <label className="setting-row__title" htmlFor="online-on">
+            Use online recognition
+          </label>
+          <p className="hint">When it's off, or there's no internet, CaptionNest uses the offline models.</p>
+        </div>
+        <Switch
+          id="online-on"
+          label="Use online recognition"
+          checked={!!saved && (settings?.onlineRecognition ?? true)}
+          onChange={(v) => void update({ onlineRecognition: v })}
+        />
+      </div>
+
+      <p className="hint settings__footnote">
+        Privacy: when online recognition is on, the speech in your video is sent to Sarvam AI in short pieces while captions are made. The picture
+        isn't sent. The key is stored only on this computer.
+      </p>
+    </>
+  );
+}
+
 function ProcessingSection() {
   const settings = useStore((s) => s.settings);
   const info = useStore((s) => s.info);
   const update = useStore((s) => s.updateSettings);
   return (
     <>
-      <SectionHead title="Processing">Everything runs on this computer.</SectionHead>
+      <SectionHead title="Processing">How the offline models run on this computer.</SectionHead>
       <div className="setting-row">
         <div>
           <label className="setting-row__title" htmlFor="gpu">

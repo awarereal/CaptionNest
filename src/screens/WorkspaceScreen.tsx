@@ -57,6 +57,25 @@ export function WorkspaceScreen() {
             Graphics acceleration wasn't available, so this run used the processor. Results are the same; it just took longer.
           </Banner>
         )}
+        {warnings.some((w) => w.startsWith("online_fallback:")) && (
+          <Banner
+            tone="gold"
+            onClose={() => useStore.setState({ warnings: warnings.filter((w) => !w.startsWith("online_fallback:")) })}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => useStore.getState().openPanel("settings", "online")}>
+                Online settings
+              </Button>
+            }
+          >
+            Online recognition didn't work this time ({warnings.find((w) => w.startsWith("online_fallback:"))!.slice("online_fallback:".length)}), so
+            these captions were made with the offline model.
+          </Banner>
+        )}
+        {warnings.includes("online_unsupported_language") && (
+          <Banner tone="teal" onClose={() => useStore.setState({ warnings: warnings.filter((w) => w !== "online_unsupported_language") })}>
+            Sarvam doesn't recognize this language, so these captions were made with the offline model.
+          </Banner>
+        )}
         <Player cues={track?.cues ?? []} showLane durationMs={project.video.durationMs} />
       </section>
       {styleOpen ? (

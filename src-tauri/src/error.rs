@@ -29,6 +29,12 @@ pub enum ErrorCode {
     ExportInvalid,
     Io,
     Internal,
+    /// Online recognition: the API key was refused.
+    OnlineKey,
+    /// Online recognition: no credits left.
+    OnlineCredits,
+    /// Online recognition failed (service busy or an unexpected reply).
+    OnlineFailed,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

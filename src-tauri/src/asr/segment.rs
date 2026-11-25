@@ -263,8 +263,19 @@ pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64
         if text.is_empty() || is_noise(text) {
             continue;
         }
-        let limit = line_limit(text, opts.max_line_chars) * opts.max_lines;
-        let chunks = split_text(text, limit);
+        // Long phrases (online recognition returns whole phrases) are split by length and
+        // by duration, so no caption stays up longer than the maximum.
+        let span_ms = (seg.end_ms - seg.start_ms).max(1);
+        let mut limit = line_limit(text, opts.max_line_chars) * opts.max_lines;
+        let chunks = loop {
+            let pieces = split_text(text, limit);
+            let total: usize = pieces.iter().map(|c| graphemes(c).max(1)).sum();
+            let longest = pieces.iter().map(|c| span_ms * graphemes(c).max(1) as i64 / total.max(1) as i64).max().unwrap_or(0);
+            if longest <= opts.max_duration_ms || limit <= 12 {
+                break pieces;
+            }
+            limit = limit * 4 / 5;
+        };
         let total: usize = chunks.iter().map(|c| graphemes(c).max(1)).sum();
         let span = (seg.end_ms - seg.start_ms).max(1);
         let mut at = seg.start_ms;
@@ -290,8 +301,13 @@ fn split_text(text: &str, limit: usize) -> Vec<String> {
         let cut_at_grapheme = |n: usize| rest.grapheme_indices(true).nth(n).map(|(i, _)| i).unwrap_or(rest.len());
         let hard = cut_at_grapheme(limit);
         let min = cut_at_grapheme(limit / 3);
+        // Punctuation counts only when a space follows, so "4,00,000" or "3.5" stay whole.
+        let before_space = |i: usize, c: char| rest[i + c.len_utf8()..].chars().next().is_none_or(char::is_whitespace);
         let pick = |set: &[char]| {
-            idx.iter().rev().find(|(i, c)| *i < hard && *i >= min && set.contains(c)).map(|(i, c)| i + c.len_utf8())
+            idx.iter()
+                .rev()
+                .find(|(i, c)| *i < hard && *i >= min && set.contains(c) && before_space(*i, *c))
+                .map(|(i, c)| i + c.len_utf8())
         };
         let cut = pick(SENTENCE_END)
             .or_else(|| pick(CLAUSE_END))
@@ -597,6 +613,22 @@ mod tests {
         let cues = segment(&words, &opts, None);
         assert!(cues.len() >= 2);
         assert!(cues.iter().skip(1).all(|c| c.start_ms % 400 == 0), "{cues:?}");
+    }
+
+    #[test]
+    fn long_online_phrases_are_split_by_duration() {
+        let text = "মার্কিন যুক্তরাষ্ট্র জুড়ে প্রায় চার লাখ মাল্টিপল স্ক্লেরোসিসের ঘটনা রয়েছে, যেটিকে অল্প বয়সী ও মধ্যবয়স্কদের মাঝে প্রধান রোগ হিসেবে দেখা হয়।";
+        let seg = Word { confidence: 1.0, start_ms: 20_000, end_ms: 38_000, text: format!(" {text}") };
+        let cues = from_segments(&[seg], &Options::default(), None);
+        assert!(cues.len() >= 3, "{cues:?}");
+        assert!(cues.iter().all(|c| c.end_ms - c.start_ms <= 6_000 + Options::default().linger_ms), "{cues:?}");
+    }
+
+    #[test]
+    fn numbers_are_never_split_at_their_commas() {
+        let pieces = split_text("মার্কিন যুক্তরাষ্ট্র জুড়ে প্রায় 4,00,000 সংখ্যক মাল্টিপল স্ক্লেরোসিসের ঘটনা রয়েছে", 30);
+        assert!(pieces.iter().all(|p| !p.ends_with(',') && !p.starts_with('0')), "{pieces:?}");
+        assert!(pieces.iter().any(|p| p.contains("4,00,000")), "{pieces:?}");
     }
 
     #[test]

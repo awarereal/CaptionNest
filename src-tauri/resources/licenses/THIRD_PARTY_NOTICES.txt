@@ -77,6 +77,13 @@ SIL Open Font License 1.1:
 Fonts are bundled through the Fontsource packages (MIT).
 
 
+Online service (optional, used only with the user's own API key)
+------------------------------------------------------------------
+Sarvam AI speech-to-text (https://www.sarvam.ai). Nothing from Sarvam is bundled;
+when the user turns on online recognition, the speech audio is sent to Sarvam's API
+under Sarvam's terms of service.
+
+
 Downloaded on request (not included in the installer)
 ------------------------------------------------------
 

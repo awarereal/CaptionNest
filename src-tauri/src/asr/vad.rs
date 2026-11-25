@@ -113,11 +113,21 @@ fn is_compact_script(l: &str) -> bool {
 /// separated by short pauses, and pads each chunk so words at the edges aren't clipped.
 /// Returns (start, end) in ms on the original timeline.
 pub fn plan_chunks(speech: &[(i64, i64)], max_ms: i64, join_gap_ms: i64, pad_ms: i64, total_ms: i64) -> Vec<(i64, i64)> {
-    let mut chunks: Vec<(i64, i64)> = Vec::new();
+    let mut joined: Vec<(i64, i64)> = Vec::new();
     for &(s, e) in speech {
-        match chunks.last_mut() {
+        match joined.last_mut() {
             Some(last) if s - last.1 < join_gap_ms && e - last.0 <= max_ms => last.1 = e,
-            _ => chunks.push((s, e)),
+            _ => joined.push((s, e)),
+        }
+    }
+    // A long stretch without pauses (a newsreader, a song) is cut into equal parts, so
+    // no chunk is longer than the recognizer can take (Whisper hears 30 s, Sarvam 30 s).
+    let mut chunks: Vec<(i64, i64)> = Vec::with_capacity(joined.len());
+    for (s, e) in joined {
+        let parts = ((e - s) as f64 / max_ms.max(1) as f64).ceil().max(1.0) as i64;
+        let step = (e - s) / parts;
+        for k in 0..parts {
+            chunks.push((s + k * step, if k + 1 == parts { e } else { s + (k + 1) * step }));
         }
     }
     let n = chunks.len();
@@ -211,5 +221,14 @@ mod tests {
     fn no_segments_means_no_filtering() {
         let words = vec![Word { confidence: 1.0, start_ms: 0, end_ms: 10, text: " a".into() }];
         assert_eq!(keep_speech(words.clone(), &[], 0), words);
+    }
+
+    #[test]
+    fn long_stretches_without_pauses_are_cut_to_fit() {
+        let chunks = plan_chunks(&[(1_000, 71_000), (80_000, 85_000)], 25_000, 1_500, 250, 90_000);
+        assert_eq!(chunks.len(), 4, "{chunks:?}");
+        assert!(chunks.iter().all(|(a, b)| b - a <= 25_000 + 500), "{chunks:?}");
+        // Parts of one stretch touch without overlapping.
+        assert!(chunks.windows(2).all(|w| w[0].1 <= w[1].0), "{chunks:?}");
     }
 }

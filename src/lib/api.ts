@@ -92,6 +92,8 @@ export const api = {
     call<{ path: string; cueCount: number; bytes: number }>("export_srt", { path, cues }),
   importSrt: (path: string) => call<Cue[]>("import_srt", { path }),
 
+  checkOnlineKey: (key: string) => call<void>("check_online_key", { key }),
+
   burnBegin: () => call<string>("burn_begin"),
   /** Sends one caption image as raw bytes (no JSON encoding of large arrays). */
   burnFrame: async (framesId: string, file: string, png: Uint8Array) => {

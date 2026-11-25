@@ -114,7 +114,10 @@ export type ErrorCode =
   | "project_too_new"
   | "export_invalid"
   | "io"
-  | "internal";
+  | "internal"
+  | "online_key"
+  | "online_credits"
+  | "online_failed";
 
 export interface AppError {
   code: ErrorCode;
@@ -210,6 +213,9 @@ export interface Settings {
   captionLanguage: string;
   recentProjects: RecentProject[];
   setupComplete: boolean;
+  /** Use Sarvam online recognition when a key is set. */
+  onlineRecognition: boolean;
+  sarvamApiKey?: string | null;
 }
 
 export interface RecentProject {

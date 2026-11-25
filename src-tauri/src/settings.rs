@@ -18,6 +18,18 @@ pub struct Settings {
     pub caption_language: String,
     pub recent_projects: Vec<RecentProject>,
     pub setup_complete: bool,
+    /// Use Sarvam's online recognition when a key is set and the language is supported.
+    pub online_recognition: bool,
+    /// The user's Sarvam API key (kept only in this file).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sarvam_api_key: Option<String>,
+}
+
+impl Settings {
+    /// The key to use for online recognition, if it's switched on.
+    pub fn online_key(&self) -> Option<String> {
+        self.sarvam_api_key.as_deref().map(str::trim).filter(|k| self.online_recognition && !k.is_empty()).map(str::to_string)
+    }
 }
 
 impl Default for Settings {
@@ -31,6 +43,8 @@ impl Default for Settings {
             caption_language: "same".into(),
             recent_projects: Vec::new(),
             setup_complete: false,
+            online_recognition: true,
+            sarvam_api_key: None,
         }
     }
 }

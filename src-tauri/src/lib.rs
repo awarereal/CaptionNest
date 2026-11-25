@@ -191,6 +191,16 @@ async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::
     Ok(job_id)
 }
 
+/// Checks a Sarvam API key before it's saved.
+#[tauri::command]
+async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err(AppError::new(ErrorCode::OnlineKey, "Paste your Sarvam API key first."));
+    }
+    asr::sarvam::check_key(&asr::sarvam::Online { key, http: state.http.clone() }).await
+}
+
 // ---------- generation ----------
 
 #[tauri::command]
@@ -201,6 +211,9 @@ async fn start_generate(app: AppHandle, state: State<'_, AppState>, request: pip
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Generate);
+        let mut request = request;
+        let key = state.settings.lock().unwrap().online_key();
+        request.online = key.map(|key| asr::sarvam::Online { key, http: state.http.clone() });
         let result = pipeline::generate(&state.paths, request, &id, &cancel, &report).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });
@@ -537,6 +550,7 @@ pub fn run() {
             probe_media,
             start_preview,
             start_generate,
+            check_online_key,
             burn_begin,
             burn_frame,
             start_burn,

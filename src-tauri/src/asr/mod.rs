@@ -1,6 +1,7 @@
 //! Speech recognition with the bundled whisper.cpp and turning words into readable cues.
 
 pub mod prompt;
+pub mod sarvam;
 pub mod script;
 pub mod segment;
 pub mod vad;

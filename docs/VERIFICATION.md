@@ -27,6 +27,13 @@ on 5 minutes of real FLEURS Bangla speech, 381 reference words:
 | **Bangla** (with Bangla punctuation prompt) | 32.3% | 13.9% | 0.24 |
 | Accurate (stock large-v3) | 75.6% | 26.4% | — |
 
+**Online recognition (Sarvam AI `saaras:v4`)**, same 5-minute test, run the way the app
+runs it (speech chunks up to 25 s): **13.1% WER, 4.0% CER**, 3 seconds for the whole
+5 minutes. A real 6-minute Bangladeshi TV news bulletin (ATN Bangla) took 6.6 s online vs
+102 s with the offline Bangla model, with names, greetings and conjuncts right where the
+offline model garbled them. Sarvam writes money as "₹17,000"; CaptionNest rewrites it as
+"১৭,০০০ টাকা" and uses Bengali digits in Bangla captions.
+
 Decisions that followed:
 - The Bangla-trained models cut spelling errors by more than half, so Bangla speech is
   transcribed with them automatically when one is installed. **Bangla Max** is
@@ -147,6 +154,9 @@ times within 0.053 s of the SRT (CapCut snaps to the project's 30 fps frames).
 - **Clean-Mac test (fresh user, quarantined download, Gatekeeper flow)** not run: no VM
   was available on the test machine.
 - **macOS 13/14** not run (minimum supported is 13.3; built against that target).
+- **Online recognition** needs the user's own Sarvam API key and internet; Sarvam's
+  synchronous API times whole phrases, so caption edges come from CaptionNest's VAD and
+  splits inside a phrase are placed in proportion to text length.
 - **Accuracy.** Bangla with the Bangla models is a strong first draft (≈ 1 word in 4 needs
   a fix on hard read speech, less on clear speech). Review the **Check** words before
   export. Background music, overlapping speakers and strong accents lower accuracy.

@@ -10,6 +10,7 @@ export type RecoveryAction =
   | "preview"
   | "set-language"
   | "free-space"
+  | "open-online"
   | "show-details";
 
 export interface Described {
@@ -66,6 +67,12 @@ export function describeError(e: AppError): Described {
       return { title: "File problem", message: m, actions: ["retry"] };
     case "cancelled":
       return { title: "Stopped", message: m, actions: [] };
+    case "online_key":
+      return { title: "Sarvam key not accepted", message: m, actions: ["open-online"] };
+    case "online_credits":
+      return { title: "Sarvam credits used up", message: m, actions: ["open-online"] };
+    case "online_failed":
+      return { title: "Online recognition stopped", message: m, actions: ["retry", "open-online", "show-details"] };
     default:
       return { title: "Something went wrong", message: m, actions: ["retry", "show-details"] };
   }

@@ -65,6 +65,22 @@ mistakes as the general models.
 - A paused or interrupted download continues where it stopped.
 - After this, CaptionNest works **without internet**.
 
+### Optional: online recognition with Sarvam AI (most accurate for Bangla)
+
+For the best Bangla spelling, CaptionNest can use Sarvam AI's online speech recognition
+instead of the offline models. In our Bangla test it made about half as many spelling
+mistakes and finished a 6-minute news video in under 10 seconds.
+
+1. Create an account at **dashboard.sarvam.ai** and copy your API key. New accounts
+   get free credits; after that it costs about ₹30 per hour of speech.
+2. In CaptionNest open **Settings → Online recognition**, paste the key and click
+   **Check and save**.
+
+From then on, Bangla, Hindi, English and 13 more Indian languages are recognized online.
+The speech in your video is sent to Sarvam while captions are made (the picture isn't).
+Turn it off any time in the same place; without internet CaptionNest uses the offline
+models automatically.
+
 ---
 
 ## 4. Make captions

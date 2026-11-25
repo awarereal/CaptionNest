@@ -13,6 +13,8 @@ import {
   SlidersHorizontal,
   Translate,
   Waveform,
+  Globe,
+  Desktop,
 } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { Player } from "../components/Player";
@@ -26,6 +28,7 @@ import { describeError, type RecoveryAction } from "../lib/errors";
 import { browseVideo } from "../lib/fileFlows";
 import type { AppError, AudioTrack, PlanInfo, Stage } from "../lib/types";
 import { DownloadStatus } from "../components/ModelCard";
+import { hasOnlineKey, onlineActive } from "../lib/online";
 
 const FEATURED = ["en", "bn", "hi", "ar"];
 
@@ -82,6 +85,53 @@ function MediaFacts() {
       </div>
     </dl>
   );
+}
+
+/** Which engine will recognize the speech, and how to switch. */
+function EngineNote({ online, spoken }: { online: boolean; spoken: string }) {
+  const settings = useStore((s) => s.settings);
+  const update = useStore((s) => s.updateSettings);
+  const openPanel = useStore((s) => s.openPanel);
+  if (online) {
+    return (
+      <div className="engine engine--online">
+        <Globe size={18} />
+        <div className="engine__body">
+          <p className="engine__title">Recognized online with Sarvam AI</p>
+          <p className="hint">The most accurate option for Bangla. The speech in this video is sent to Sarvam; it uses your Sarvam credits.</p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => void update({ onlineRecognition: false })}>
+          Use offline
+        </Button>
+      </div>
+    );
+  }
+  if (hasOnlineKey(settings) && !(settings?.onlineRecognition ?? true)) {
+    return (
+      <div className="engine">
+        <Desktop size={18} />
+        <div className="engine__body">
+          <p className="engine__title">Recognized on this computer</p>
+          <p className="hint">Online recognition with Sarvam is off.</p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => void update({ onlineRecognition: true })}>
+          Use Sarvam
+        </Button>
+      </div>
+    );
+  }
+  if (!hasOnlineKey(settings) && (spoken === "bn" || spoken === "auto")) {
+    return (
+      <button className="engine engine--hint" onClick={() => openPanel("settings", "online")}>
+        <Globe size={18} />
+        <span className="engine__body">
+          <span className="engine__title">Want even better Bangla spelling?</span>
+          <span className="hint">Sarvam's online recognition makes about half as many mistakes. Add a key in Settings.</span>
+        </span>
+      </button>
+    );
+  }
+  return null;
 }
 
 function trackLabel(t: AudioTrack, i: number) {
@@ -193,7 +243,8 @@ function CaptionOptions() {
   const spokenLang = language(spoken);
   const missingPacks = (plan?.missingPackages ?? []).map((id) => models?.argos.find((p) => p.id === id)).filter(Boolean);
   const needsTranslator = caption === "en" && spoken !== "en" && !translator;
-  const noModel = !model;
+  const online = onlineActive(settings, spoken);
+  const noModel = !model && !online;
   const blocked = noModel || needsTranslator || missingPacks.length > 0 || audioStream === null;
 
   return (
@@ -231,6 +282,8 @@ function CaptionOptions() {
         )
       )}
 
+      <EngineNote online={online} spoken={spoken} />
+
       <div className="formrow">
         <label className="label" htmlFor="spoken">
           Spoken language
@@ -242,6 +295,7 @@ function CaptionOptions() {
           </p>
         )}
         {spoken === "auto" &&
+          !online &&
           (accurate?.installed ? (
             <p className="formrow__note">Detection listens to the first 30 seconds of speech. Choose the language if more than one is spoken.</p>
           ) : (
@@ -317,7 +371,7 @@ function CaptionOptions() {
         </div>
       )}
 
-      {(spoken === "bn" || spoken === "auto") && banglaModel && !banglaModel.installed && (
+      {!online && (spoken === "bn" || spoken === "auto") && banglaModel && !banglaModel.installed && (
         <div className="callout callout--gold">
           <DownloadSimple size={18} />
           <div className="callout__body">
@@ -338,7 +392,7 @@ function CaptionOptions() {
 
       <div className="options__model">
         <span className="options__model-label">
-          <SlidersHorizontal size={15} /> Speech model
+          <SlidersHorizontal size={15} /> {online ? "Offline model (if online fails)" : "Speech model"}
         </span>
         {generalInstalled.length > 1 ? (
           <Select
@@ -350,7 +404,7 @@ function CaptionOptions() {
         ) : (
           <span className="options__model-name">{model ? modelName(model.id) : "None installed"}</span>
         )}
-        {(spoken === "bn" || spoken === "auto") && banglaModel?.installed && (
+        {!online && (spoken === "bn" || spoken === "auto") && banglaModel?.installed && (
           <p className="formrow__note">
             <Info size={14} /> Bangla speech uses the Bangla model for correct spelling.
           </p>
@@ -519,6 +573,10 @@ export function JobError({ error }: { error: AppError }) {
         st.openPanel("settings", "languages");
         st.dismissJobError();
         break;
+      case "open-online":
+        st.openPanel("settings", "online");
+        st.dismissJobError();
+        break;
       case "show-details":
         setDetails((v) => !v);
         break;
@@ -533,6 +591,7 @@ export function JobError({ error }: { error: AppError }) {
     "choose-track": "Choose another sound track",
     "open-models": "Open speech models",
     "open-languages": "Open language packs",
+    "open-online": "Open online recognition",
     preview: "Make a preview copy",
     "set-language": "Choose the spoken language",
     "free-space": "Manage downloads",

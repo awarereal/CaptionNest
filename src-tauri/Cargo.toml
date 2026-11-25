@@ -38,7 +38,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process"
 uuid = { version = "1.29.3", features = ["v4"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 # OS TLS stack (SChannel / Security.framework) and OS proxy settings for model downloads.
-reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls", "http2", "system-proxy"] }
+reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls", "http2", "system-proxy", "multipart"] }
 # Offline machine translation (runs Argos Translate models without Python).
 ct2rs = { version = "0.11.3", default-features = false, features = ["ruy"] }
 sentencepiece = { version = "0.14.0", features = ["static"] }

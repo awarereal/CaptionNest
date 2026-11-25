@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{prompt, script, segment, vad, whisper};
+use crate::asr::{prompt, sarvam, script, segment, vad, whisper};
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -39,6 +39,9 @@ pub struct GenerateRequest {
     /// Testing only: use this model file instead of a catalog model.
     #[serde(default)]
     pub model_path_override: Option<String>,
+    /// Online recognition (filled in from Settings by the app, never sent by the UI).
+    #[serde(skip)]
+    pub online: Option<sarvam::Online>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,10 +87,19 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         return Err(AppError::new(ErrorCode::FileNotFound, "The video can't be found. It may have been moved or deleted."));
     }
     let spoken = (req.spoken_language != "auto").then(|| req.spoken_language.clone());
-    let transcribe_model = match &req.model_path_override {
-        Some(p) => PathBuf::from(p),
-        None => installed_whisper(paths, &req.transcribe_model_id)?,
+    let online = req.online.clone();
+    // Spoken languages Sarvam doesn't know still need an offline model.
+    let online_language_ok = spoken.as_deref().is_none_or(|l| sarvam::language_code(l).is_some());
+    let offline_model = match &req.model_path_override {
+        Some(p) => Ok(PathBuf::from(p)),
+        None => installed_whisper(paths, &req.transcribe_model_id),
     };
+    if online.is_none() || !online_language_ok {
+        if let Err(e) = &offline_model {
+            return Err(e.clone());
+        }
+    }
+    let transcribe_model = offline_model.clone().unwrap_or_default();
     // Fail fast, before minutes of work, when a needed model or package is missing.
     preflight_translation(paths, spoken.as_deref(), &req.caption_language, &req.transcribe_model_id, req.translate_model_id.as_deref())?;
 
@@ -114,7 +126,8 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         prompt: None,
     };
     let mut uncertain = None;
-    if opts.language.is_none() {
+    let can_detect = offline_model.is_ok() || catalog::whisper_model(DETECTION_MODEL).is_some_and(|m| models::whisper_installed(paths, m));
+    if opts.language.is_none() && can_detect {
         // The Accurate model identifies languages far more reliably (on real Bangla speech
         // it was right 20 of 20 times; the Fast model 3 of 20), so it detects when present.
         let mut detect_opts = opts.clone();
@@ -153,16 +166,47 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let mut seg = ctx.seg.clone();
     seg.speech = vad::unpadded(&speech);
     let ctx = Ctx { speech, seg, ..ctx };
-    let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
     let mut warnings: Vec<String> = uncertain.into_iter().collect();
-    if req.use_gpu && !t.used_gpu {
+
+    // Online first when set up: far fewer spelling mistakes, and fast.
+    let mut online_result = None;
+    if let Some(online) = &online {
+        let code = match opts.language.as_deref() {
+            Some(l) => sarvam::language_code(l),
+            None => Some("unknown"),
+        };
+        match code {
+            Some(code) => match recognize_online(&ctx, &wav, online, code, req.duration_ms).await {
+                Ok(r) => online_result = Some(r),
+                Err(e) if e.is_cancelled() => return Err(e),
+                Err(e) if offline_model.is_ok() => {
+                    log::warn!("online recognition failed, using the offline model: {e:?}");
+                    warnings.push(format!("online_fallback:{}", e.message));
+                }
+                Err(e) => return Err(e),
+            },
+            None => warnings.push("online_unsupported_language".to_string()),
+        }
+    }
+    let engine_used = if online_result.is_some() { Some(format!("sarvam:{}", sarvam::MODEL)) } else { specialised.clone() };
+    let (t, missed, online_cues) = match online_result {
+        Some((t, missed)) => {
+            let cues = segment::from_segments(&t.words, &ctx.seg, Some(req.duration_ms));
+            (t, missed, Some(cues))
+        }
+        None => {
+            let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
+            (t, missed, None)
+        }
+    };
+    if req.use_gpu && !t.used_gpu && online_cues.is_none() {
         warnings.push("gpu_fallback".to_string());
     }
     if t.repaired_text {
         warnings.push("text_repaired".to_string());
     }
     let language = t.language.clone().or(spoken.clone()).unwrap_or_else(|| "und".into());
-    let mut cues = segment::segment(&t.words, &ctx.seg, Some(req.duration_ms));
+    let mut cues = online_cues.unwrap_or_else(|| segment::segment(&t.words, &ctx.seg, Some(req.duration_ms)));
     if cues.is_empty() && missed.is_empty() {
         return Err(AppError::new(
             ErrorCode::NoSpeech,
@@ -196,7 +240,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     }
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
-    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(language), used_gpu: t.used_gpu, warnings, model_used: specialised })
+    Ok(GenerateResult { tracks, active_track_id, detected_language: Some(language), used_gpu: t.used_gpu, warnings, model_used: engine_used })
 }
 
 /// Adds a caption language to an existing project.
@@ -227,6 +271,32 @@ pub async fn translate_existing(paths: &Paths, req: TranslateRequest, job_id: &s
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
     Ok(GenerateResult { tracks, active_track_id, detected_language: Some(source_lang), used_gpu, warnings: vec![], model_used: None })
+}
+
+/// Online recognition of the speech in chunks of up to 25 s. Returns the transcript and
+/// the speech spans that came back without words.
+async fn recognize_online(ctx: &Ctx<'_>, wav: &Path, online: &sarvam::Online, language: &str, duration_ms: i64) -> AppResult<(whisper::Transcript, vad::Segments)> {
+    let spans = if ctx.speech.is_empty() {
+        whisper::fixed_windows(0, duration_ms, sarvam::MAX_CHUNK_MS)
+    } else {
+        vad::plan_chunks(&ctx.speech, sarvam::MAX_CHUNK_MS, 1_500, 250, duration_ms)
+    };
+    let detail = Some("online".to_string());
+    ctx.report.stage("transcribing", Some(0.0), detail.clone());
+    let mut t = sarvam::transcribe_spans(online, wav, &spans, language, &ctx.scratch.path().join("online"), ctx.cancel, |p| {
+        ctx.report.stage("transcribing", Some(p * 0.95), detail.clone())
+    })
+    .await?;
+    if language != "unknown" {
+        t.language = t.language.or_else(|| Some(sarvam::from_code(language)));
+    }
+    if let Some(lang) = t.language.clone() {
+        for w in &mut t.words {
+            w.text = sarvam::localize(&w.text, &lang);
+        }
+    }
+    let missed = vad::uncovered(&ctx.speech, &t.words, 300, 1_500);
+    Ok((t, missed))
 }
 
 /// Runs the recognizer over the speech, then re-checks any stretch of speech that came
