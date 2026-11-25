@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{align, prompt, sarvam, script, segment, vad, whisper};
+use crate::asr::{align, prompt, resync, sarvam, script, segment, vad, whisper};
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -125,6 +125,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         word_timestamps: true,
         prompt: None,
         timing_only: false,
+        dtw: false,
     };
     let mut uncertain = None;
     let can_detect = offline_model.is_ok() || catalog::whisper_model(DETECTION_MODEL).is_some_and(|m| models::whisper_installed(paths, m));
@@ -299,6 +300,143 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     Ok(GenerateResult { tracks, active_track_id, detected_language: Some(language), used_gpu: t.used_gpu, warnings, model_used: engine_used })
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResyncRequest {
+    pub video_path: String,
+    pub audio_stream_index: u32,
+    pub duration_ms: i64,
+    /// Language of the captions ("und" lets the model decide).
+    pub language: String,
+    pub cues: Vec<Cue>,
+    /// Only captions starting in this range are synced (both empty = all).
+    pub from_ms: Option<i64>,
+    pub to_ms: Option<i64>,
+    pub transcribe_model_id: String,
+    pub use_gpu: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResyncResult {
+    /// One entry per caption, in the order sent, with its new and old times.
+    pub cues: Vec<resync::Synced>,
+    pub summary: resync::Summary,
+    /// Catalog id of the offline model that listened.
+    pub model_used: Option<String>,
+}
+
+/// Auto-sync: listens to the video with an offline model and moves the captions to
+/// where their words are spoken. Nothing but times is returned; the text isn't touched.
+pub async fn resync_captions(paths: &Paths, req: ResyncRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<ResyncResult> {
+    report.stage("preparing", None, None);
+    let video = PathBuf::from(&req.video_path);
+    if !video.is_file() {
+        return Err(AppError::new(ErrorCode::FileNotFound, "The video can't be found. It may have been moved or deleted."));
+    }
+    let language = (!matches!(req.language.as_str(), "und" | "auto" | "")).then(|| req.language.clone());
+    let base = whisper::Options {
+        model: PathBuf::new(),
+        language: language.clone(),
+        translate: false,
+        use_gpu: req.use_gpu,
+        threads: whisper::default_threads(),
+        word_timestamps: true,
+        prompt: None,
+        timing_only: false,
+        dtw: false,
+    };
+    let chosen = installed_whisper(paths, &req.transcribe_model_id).ok();
+    let mut fast = timing_options(paths, &base, chosen.as_ref()).ok_or_else(|| {
+        AppError::new(ErrorCode::ModelMissing, "Auto-sync listens with an offline speech model, and none is downloaded yet. Download one in Settings.")
+    })?;
+    // Only the words and which stretch of speech they're in are used, not word times.
+    fast.dtw = false;
+    // (CAPTIONNEST_SYNC_MODE: developer switch to compare listening settings.)
+    if let Ok(mode) = std::env::var("CAPTIONNEST_SYNC_MODE") {
+        fast.timing_only = mode.contains("greedy");
+        fast.dtw = mode.contains("dtw");
+    }
+    let model_used = catalog::whisper().models.iter().find(|m| models::whisper_path(paths, m) == fast.model).map(|m| m.id.clone());
+
+    let scratch = ScratchDir::create(&paths.jobs, job_id)?;
+    let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg: segment::Options::default(), speech: Vec::new() };
+    let wav = extract_wav(&ctx, &video, req.audio_stream_index, req.duration_ms).await?;
+    report.stage("transcribing", Some(0.0), None);
+    let speech = find_speech(&ctx, &wav).await?;
+    let section = match (req.from_ms, req.to_ms) {
+        (None, None) => None,
+        (a, b) => Some((a.unwrap_or(0).max(0), b.unwrap_or(req.duration_ms).min(req.duration_ms))),
+    };
+    // A section is listened to with room on both sides, for captions that are far off.
+    let listen: vad::Segments = match section {
+        Some((a, b)) => speech.iter().copied().filter(|s| s.1 > a - 20_000 && s.0 < b + 20_000).collect(),
+        None => speech.clone(),
+    };
+    let cli = paths.tool("whisper-cli")?;
+    let max_ms = vad::chunk_limit_ms(language.as_deref());
+    let repair = |words: &mut Vec<crate::asr::Word>| {
+        if script::uses_bengali_script(language.as_deref().unwrap_or_default()) {
+            for w in words.iter_mut() {
+                w.text = script::devanagari_to_bengali(&w.text);
+            }
+        }
+    };
+
+    // First listen: fast, the whole section, one stretch of speech between pauses at a
+    // time, so every heard word is known to lie between two pauses (the model's own
+    // word times wander by a second or more, and slide words back across a pause).
+    let edges = vad::unpadded(&speech);
+    let mut spans = vad::plan_pause_chunks(&listen, max_ms.min(sarvam::MAX_CHUNK_MS), 0, 150, req.duration_ms);
+    // Short stretches together: they share a small audio window, which is much faster.
+    spans.sort_by_key(|&(a, b)| b - a);
+    let mut heard = whisper::transcribe_spans(&cli, &wav, &spans, &scratch.path().join("listen"), &fast, cancel, |p| {
+        report.stage("transcribing", Some(p * 0.8), None)
+    })
+    .await?
+    .words;
+    repair(&mut heard);
+    let mut heard = vad::keep_speech(heard, &listen, 400);
+    vad::confine_to_chunks(&mut heard, &spans, &edges);
+    let (mut cues, mut summary) = resync::resync(&req.cues, &heard, &edges, section, req.duration_ms);
+
+    // Second listen: slower and more careful, only around captions that weren't found.
+    let retry = resync::unmatched_spans(&cues, 2_500, req.duration_ms);
+    let retry_ms: i64 = retry.iter().map(|(a, b)| b - a).sum();
+    if !retry.is_empty() && !spans.is_empty() && retry_ms <= (vad::speech_ms(&listen) * 35 / 100).max(60_000) {
+        let mut careful = fast.clone();
+        careful.timing_only = false;
+        let windows: Vec<(i64, i64)> = spans.iter().copied().filter(|&(a, b)| retry.iter().any(|&(ra, rb)| a < rb && b > ra)).collect();
+        let second = whisper::transcribe_spans(&cli, &wav, &windows, &scratch.path().join("listen-again"), &careful, cancel, |p| {
+            report.stage("transcribing", Some(0.8 + p * 0.17), None)
+        })
+        .await;
+        match second {
+            Ok(t) => {
+                let mut again = t.words;
+                repair(&mut again);
+                vad::confine_to_chunks(&mut again, &windows, &edges);
+                let inside = |ms: i64| windows.iter().any(|&(a, b)| ms >= a && ms < b);
+                heard.retain(|w| !inside(w.start_ms));
+                heard.extend(again);
+                heard.sort_by_key(|w| w.start_ms);
+                (cues, summary) = resync::resync(&req.cues, &heard, &edges, section, req.duration_ms);
+            }
+            Err(e) if e.is_cancelled() => return Err(e),
+            Err(e) => log::warn!("second listen failed, keeping the first result: {e:?}"),
+        }
+    }
+    report.stage("finishing", None, None);
+    if let Ok(dir) = std::env::var("CAPTIONNEST_DEBUG_DIR") {
+        // Developer aid: what the offline model heard, with times.
+        let rows: Vec<_> = heard.iter().map(|w| serde_json::json!([w.start_ms, w.end_ms, w.text.trim()])).collect();
+        let _ = std::fs::write(Path::new(&dir).join("resync-heard.json"), serde_json::to_vec(&rows).unwrap_or_default());
+        let _ = std::fs::write(Path::new(&dir).join("resync-regions.json"), serde_json::to_vec(&edges).unwrap_or_default());
+    }
+    log::info!("auto-sync: {:?}, {} matched, {} estimated, {} not found", summary.kind, summary.matched, summary.estimated, summary.unmatched);
+    Ok(ResyncResult { cues, summary, model_used })
+}
+
 /// Adds a caption language to an existing project.
 pub async fn translate_existing(paths: &Paths, req: TranslateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
     report.stage("preparing", None, None);
@@ -359,8 +497,10 @@ fn timing_options(paths: &Paths, opts: &whisper::Options, offline: Option<&PathB
     t.prompt = None;
     t.translate = false;
     t.word_timestamps = true;
-    // Greedy, single pass: it only has to find where known words are.
+    // Greedy, single pass: it only has to find where known words are. Word times from
+    // the model's attention, because here timing is the whole point.
     t.timing_only = true;
+    t.dtw = true;
     let installed = |m: &&catalog::WhisperModel| models::whisper_installed(paths, m);
     let pick = opts
         .language
@@ -571,6 +711,7 @@ async fn whisper_english(
         // into the output when the speech is unclear.
         prompt: None,
         timing_only: false,
+        dtw: false,
     };
     // Re-use speech regions from this job, or find them (adding a language later).
     let speech = if ctx.speech.is_empty() { find_speech(ctx, wav).await.unwrap_or_default() } else { ctx.speech.clone() };
@@ -630,6 +771,7 @@ async fn argos_translate(ctx: &Ctx<'_>, base: &Track, target: &str, packages: &[
         .zip(texts)
         .map(|(c, text)| Cue {
             check: Vec::new(),
+            timing_check: false,
             id: uuid::Uuid::new_v4().to_string(),
             start_ms: c.start_ms,
             end_ms: c.end_ms,

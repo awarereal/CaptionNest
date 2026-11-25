@@ -96,6 +96,37 @@ time on Apple-chip GPUs and 21% on CPU), and caption edges at pauses are placed 
 speech onsets/offsets found by the Silero VAD. In CapCut the SRT lands within one video
 frame (CapCut snaps to frames).
 
+## Auto-sync captions
+
+Auto-sync moves existing captions to where their words are spoken, using only what runs
+on the computer: the voice-activity detector finds the pauses, and an offline speech
+model says which words lie between which pauses. The model's own word times are not
+used: measured against exactly timed speech they were off by 1-2 s in about 15% of
+captions, with or without attention alignment (DTW), greedy or beam search. Pauses are
+exact, so a caption that begins after a pause lands on it; a caption that begins
+mid-speech is placed by text length (good to about 0.3-0.45 s).
+
+Test: `scripts/bench/make_phrase_audio.py` builds a 4.4-minute Bangla recording of 70
+caption-sized phrases whose start and end are known exactly (gaps from 0.06 s to 1.5 s).
+The exact captions are knocked out of sync and auto-synced (`scripts/bench/resync_check.py`):
+
+| Captions were | Auto-sync found | Start error after (median / worst) | Within 0.3 s |
+|---|---|---|---|
+| all 2.5 s late | "offset", −2.5 s | 0.009 s / 0.29 s | 70 of 70 |
+| drifting, 3% slow (up to 7.9 s late) | "drift", −0.03 s → −7.9 s | 0.036 s / 0.44 s | 91% |
+| 1 in 6 moved 1.5-4 s at random | "mixed" | 0.000 s / see note | 93% |
+
+Note on the third row: two captions had been moved past their neighbours (out of
+order), which a matcher that keeps the order can't undo; both were marked for review.
+Through the real interface (`scripts/dev/sync_check.py`): whole video and section-only
+runs, preview, apply, "Check timing" marks, text and order untouched, Undo restores the
+old times; at a section's edge a synced caption never crosses an untouched one.
+
+Limits: needs an installed offline model for the captions' language; translated tracks
+can't be synced (their words aren't the spoken words); captions over loud music or
+overlapping voices are marked for review, not moved by guesswork; a 4.4-minute file
+takes about 30-40 s on an M3 Pro.
+
 ## Long video
 
 30.2-minute video of 126 real Bangla utterances with 0.5–3 s pauses, run through the real

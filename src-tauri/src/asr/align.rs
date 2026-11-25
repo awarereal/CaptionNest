@@ -97,7 +97,7 @@ pub fn collapse_repeats(text: &str) -> String {
 }
 
 /// Letters that count when matching: letters and vowel signs, not digits or punctuation.
-fn letters(s: &str) -> Vec<char> {
+pub(crate) fn letters(s: &str) -> Vec<char> {
     s.chars()
         .filter(|c| c.is_alphabetic() || (('\u{0980}'..='\u{09FF}').contains(c) && !('\u{09E6}'..='\u{09EF}').contains(c) && *c != '\u{09F3}'))
         .flat_map(char::to_lowercase)
@@ -110,7 +110,7 @@ fn min_ms(word: &str) -> i64 {
 }
 
 /// How alike two words are, 0..1: shared letters in order over the longer word.
-fn similarity(a: &[char], b: &[char]) -> f32 {
+pub(crate) fn similarity(a: &[char], b: &[char]) -> f32 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }

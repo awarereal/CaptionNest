@@ -13,6 +13,7 @@ import {
   Info,
   X,
   WarningCircle,
+  Metronome,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useActiveTrack, useStore } from "../state/store";
@@ -22,7 +23,7 @@ import { CueList } from "../components/CueList";
 import { Button, IconButton } from "../components/ui";
 import { canRedo, canUndo } from "../lib/history";
 import { languageName } from "../lib/languages";
-import { overlappingIds, sortCues, wordsToCheck } from "../lib/cueOps";
+import { overlappingIds, sortCues, wordsToCheck, type ShiftScope } from "../lib/cueOps";
 import { parseOffsetSeconds } from "../lib/time";
 import { api, toAppError } from "../lib/api";
 import { confirmDiscard, pickOpen, saveProject } from "../lib/fileFlows";
@@ -30,6 +31,8 @@ import { useExport } from "../panels/ExportDialog";
 import { ExportDialog } from "../panels/ExportDialog";
 import { TranslateDialog } from "../panels/TranslateDialog";
 import { StylePanel } from "../panels/StylePanel";
+import { SyncDialog } from "../panels/SyncDialog";
+import { useSync } from "../state/sync";
 import { JobError, JobProgress } from "./PrepareScreen";
 import { VIDEO_EXTENSIONS } from "../lib/fileFlows";
 import { ask } from "../components/Confirm";
@@ -102,6 +105,7 @@ export function WorkspaceScreen() {
         </section>
       )}
       <ExportDialog />
+      <SyncDialog />
       <TranslateDialog open={translateOpen} onOpenChange={setTranslateOpen} />
     </div>
   );
@@ -258,6 +262,9 @@ function CaptionsHeader({ onTranslate }: { onTranslate: () => void }) {
           Add caption
         </Button>
         <ShiftTiming disabled={!track || !!job} />
+        <Button size="sm" variant="ghost" icon={<Metronome size={15} />} onClick={() => useSync.getState().open()} disabled={!track || !!job}>
+          Auto-sync
+        </Button>
         <span className="caphead__spacer" />
         <IconButton label="Undo" shortcut="Mod+Z" onClick={undo} disabled={!canUndo(history) || !!job}>
           <ArrowCounterClockwise size={18} />
@@ -319,24 +326,41 @@ function CaptionsHeader({ onTranslate }: { onTranslate: () => void }) {
 function ShiftTiming({ disabled }: { disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
-  const offset = useStore((s) => s.offsetAll);
+  const [scope, setScope] = useState<ShiftScope>("all");
+  const offset = useStore((s) => s.offsetCues);
+  const track = useActiveTrack();
+  const selectedId = useStore((s) => s.selectedCueId);
+  const sorted = useMemo(() => (track ? sortCues(track.cues) : []), [track]);
+  const index = sorted.findIndex((c) => c.id === selectedId);
+  const selected = index >= 0 ? sorted[index] : null;
+  const number = index + 1;
   const ms = parseOffsetSeconds(value);
+  const useScope: ShiftScope = selected ? scope : "all";
+
+  // Opening with a caption selected: the paused position is most likely where it belongs.
+  const onOpenChange = (o: boolean) => {
+    setOpen(o);
+    if (o) {
+      setValue("");
+      setScope(selected ? "one" : "all");
+    }
+  };
   const apply = () => {
     if (ms === null || ms === 0) return;
-    offset(ms);
+    offset(ms, useScope, selected?.id ?? null);
     setOpen(false);
-    setValue("");
-    toast(`All captions moved ${ms > 0 ? "later" : "earlier"} by ${Math.abs(ms / 1000)} s`);
+    const what = useScope === "all" ? "All captions" : useScope === "from" ? `Caption ${number} and later ones` : `Caption ${number}`;
+    toast(`${what} moved ${ms > 0 ? "later" : "earlier"} by ${Math.abs(ms / 1000)} s`);
   };
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger asChild>
         <Button size="sm" variant="ghost" icon={<Clock size={15} />} disabled={disabled}>
           Shift timing
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content className="menu popover" sideOffset={6} align="start" collisionPadding={10}>
+        <Popover.Content className="menu popover popover--shift" sideOffset={6} align="start" collisionPadding={10}>
           <form
             className="shift"
             onSubmit={(e) => {
@@ -344,8 +368,34 @@ function ShiftTiming({ disabled }: { disabled: boolean }) {
               apply();
             }}
           >
-            <label className="label" htmlFor="shift-input">
-              Move every caption by
+            <span className="label" id="shift-scope">
+              Move
+            </span>
+            <div className="seg shift__scope" role="radiogroup" aria-labelledby="shift-scope">
+              {(
+                [
+                  ["all", "All captions"],
+                  ["from", selected ? `${number} and later` : "From a caption on"],
+                  ["one", selected ? `Only ${number}` : "One caption"],
+                ] as [ShiftScope, string][]
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={useScope === id}
+                  className={`seg__opt ${useScope === id ? "is-on" : ""}`}
+                  disabled={id !== "all" && !selected}
+                  onClick={() => setScope(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {!selected && <p className="hint">Click a caption first to move only it, or it and the ones after it.</p>}
+
+            <label className="label shift__by" htmlFor="shift-input">
+              By
             </label>
             <div className="shift__row">
               <input
@@ -359,7 +409,10 @@ function ShiftTiming({ disabled }: { disabled: boolean }) {
               />
               <span className="shift__unit">seconds</span>
             </div>
-            <p className="hint">Use a minus sign to move captions earlier, e.g. −0.25.</p>
+            <p className="hint">Use a minus sign to move captions earlier, e.g. -0.25.</p>
+
+            {selected && <PausedDifference startMs={selected.startMs} number={number} onUse={setValue} />}
+
             <div className="shift__actions">
               <Button type="submit" variant="primary" size="sm" disabled={ms === null || ms === 0}>
                 Apply
@@ -372,6 +425,25 @@ function ShiftTiming({ disabled }: { disabled: boolean }) {
   );
 }
 
+/** Works out how far a caption's start is from where the video is now. */
+function PausedDifference({ startMs, number, onUse }: { startMs: number; number: number; onUse: (value: string) => void }) {
+  const now = usePlayhead((s) => s.ms);
+  const diff = Math.round(now - startMs);
+  if (Math.abs(diff) < 10) return null;
+  const at = (v: number) => `${Math.floor(v / 60000)}:${((v % 60000) / 1000).toFixed(2).padStart(5, "0")}`;
+  const signed = `${diff > 0 ? "+" : "-"}${(Math.abs(diff) / 1000).toFixed(2)}`;
+  return (
+    <div className="shift__diff">
+      <p>
+        Caption {number} starts at <span className="mono">{at(startMs)}</span>. The video is at <span className="mono">{at(now)}</span>.
+      </p>
+      <Button type="button" size="sm" variant="secondary" onClick={() => onUse(signed)}>
+        Use the difference ({signed} s)
+      </Button>
+    </div>
+  );
+}
+
 function StatusBar() {
   const track = useActiveTrack();
   const select = useStore((s) => s.selectCue);
@@ -381,7 +453,7 @@ function StatusBar() {
     const overlaps = overlappingIds(cues);
     const empty = cues.filter((c) => !c.text.trim());
     const invalid = cues.filter((c) => c.endMs <= c.startMs);
-    const toCheck = cues.filter((c) => wordsToCheck(c).length > 0);
+    const toCheck = cues.filter((c) => wordsToCheck(c).length > 0 || c.timingCheck);
     return { count: cues.length, overlaps, empty, invalid, cues, toCheck };
   }, [track]);
   if (!track) return null;
@@ -425,7 +497,7 @@ function StatusBar() {
               select(next.id);
               usePlayhead.getState().seek(next.startMs);
             }}
-            title="Jump to the next caption with words to check"
+            title="Jump to the next caption with words or timing to check"
           >
             {stats.toCheck.length} to check · next
           </button>

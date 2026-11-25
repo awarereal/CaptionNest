@@ -2,6 +2,7 @@
 
 pub mod align;
 pub mod prompt;
+pub mod resync;
 pub mod sarvam;
 pub mod script;
 pub mod segment;

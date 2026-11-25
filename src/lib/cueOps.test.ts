@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeIndex, addCue, deleteCue, mergeWithNext, offsetAll, overlappingIds, retimeCue, sortCues, splitCue, updateCue } from "./cueOps";
+import { activeIndex, addCue, deleteCue, mergeWithNext, offsetAll, offsetCues, overlappingIds, retimeCue, sortCues, splitCue, updateCue } from "./cueOps";
 import type { Cue } from "./types";
 
 const cue = (id: string, startMs: number, endMs: number, text = id): Cue => ({ id, startMs, endMs, text });
@@ -64,6 +64,16 @@ describe("cue editing", () => {
     expect(back[0].startMs).toBe(0);
     expect(back[0].endMs).toBeGreaterThanOrEqual(200);
     expect(back[1].startMs).toBe(300);
+  });
+
+  it("shifts one caption, or one and everything after it", () => {
+    const one = offsetCues(base, 300, "one", "b");
+    expect(one.map((c) => [c.startMs, c.endMs])).toEqual([[0, 1000], [1800, 3300], [4000, 5000]]);
+    const from = offsetCues(base, -400, "from", "b");
+    expect(from.map((c) => [c.startMs, c.endMs])).toEqual([[0, 1000], [1100, 2600], [3600, 4600]]);
+    expect(from[0]).toBe(base[0]);
+    expect(offsetCues(base, 500, "all", null).map((c) => c.startMs)).toEqual([500, 2000, 4500]);
+    expect(offsetCues(base, 500, "one", "missing")).toBe(base);
   });
 
   it("finds overlapping cues", () => {

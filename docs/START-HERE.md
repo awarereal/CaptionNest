@@ -104,8 +104,18 @@ models automatically.
   the ↑ / ↓ keys (0.1 s; hold Shift for 1 s).
 - Hover a caption for **Play**, **Split**, **Merge with next** and **Delete**.
   Press Ctrl+Enter (⌘+Enter on Mac) while typing to split at the cursor.
-- **Add caption** inserts one at the current position. **Shift timing** moves every
-  caption earlier or later.
+- **Add caption** inserts one at the current position.
+- **Shift timing** moves captions earlier or later: all of them, one caption and
+  everything after it, or just one. Click the caption, pause the video where it should
+  start, open Shift timing and click **Use the difference**: CaptionNest works out the
+  number for you.
+- **Auto-sync** fixes timing by itself. CaptionNest listens to the video on your
+  computer (free, offline) and moves each caption to where its words are spoken, for
+  the whole video or just a section. It tells you what it found (for example "about
+  2 s late, all by the same amount", or a drift that grows), shows every change before
+  anything is applied, and never touches the words. Captions it couldn't hear clearly
+  are marked **Check timing** instead of being guessed. **Undo** brings the old times
+  back.
 - **Undo / Redo**: Ctrl+Z / Ctrl+Shift+Z (⌘ on Mac).
 - Words the speech model wasn't sure about appear as **Check** chips under the caption.
   Listen, fix the word if needed, then click **Looks right**. The status bar counts what

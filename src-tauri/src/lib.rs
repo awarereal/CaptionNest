@@ -191,6 +191,22 @@ async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::
     Ok(job_id)
 }
 
+/// Auto-sync: finds where the captions are spoken. Returns new times for review; the
+/// project isn't changed here.
+#[tauri::command]
+async fn start_sync(app: AppHandle, state: State<'_, AppState>, request: pipeline::ResyncRequest) -> Cmd<String> {
+    let (job_id, cancel) = state.jobs.begin(JobKind::Sync);
+    let id = job_id.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = handle.state::<AppState>();
+        let report = Reporter::new(handle.clone(), id.clone(), JobKind::Sync);
+        let result = pipeline::resync_captions(&state.paths, request, &id, &cancel, &report).await;
+        jobs::finish(&handle, &state.jobs, JobKind::Sync, &id, result);
+    });
+    Ok(job_id)
+}
+
 /// Checks a Sarvam API key before it's saved.
 #[tauri::command]
 async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
@@ -498,7 +514,9 @@ pub fn run() {
     let is_self_test = self_test.is_some();
 
     let mut builder = tauri::Builder::default();
-    if !is_self_test {
+    // A test build driven through the automation bridge runs next to an installed copy.
+    let test_instance = cfg!(feature = "automation") && std::env::var_os("CAPTIONNEST_AUTOMATION_PORT").is_some();
+    if !is_self_test && !test_instance {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
@@ -551,6 +569,7 @@ pub fn run() {
             start_preview,
             start_generate,
             check_online_key,
+            start_sync,
             burn_begin,
             burn_frame,
             start_burn,

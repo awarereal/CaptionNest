@@ -7,6 +7,8 @@ export interface Cue {
   text: string;
   /** Words the recognizer was unsure about; shown for review, never exported. */
   check?: string[];
+  /** Auto-sync couldn't confirm this caption's time; shown for review, never exported. */
+  timingCheck?: boolean;
 }
 
 export type TrackKind = "original" | "translation";
@@ -169,7 +171,37 @@ export interface DownloadEvent {
   error?: AppError;
 }
 
-export type JobKind = "generate" | "preview" | "burn";
+export type JobKind = "generate" | "preview" | "burn" | "sync";
+
+/** Auto-sync: one caption's new and old times. */
+export interface SyncedCue {
+  id: string;
+  startMs: number;
+  endMs: number;
+  oldStartMs: number;
+  oldEndMs: number;
+  /** matched: heard in the audio. estimated: placed by its neighbours. unmatched: left as it was. outside: not in the synced section. */
+  status: "matched" | "estimated" | "unmatched" | "outside";
+  confidence: number;
+}
+
+export interface SyncSummary {
+  kind: "in_sync" | "offset" | "drift" | "mixed" | "no_match";
+  matched: number;
+  estimated: number;
+  unmatched: number;
+  changed: number;
+  medianShiftMs: number;
+  firstShiftMs: number;
+  lastShiftMs: number;
+  maxShiftMs: number;
+}
+
+export interface SyncResult {
+  cues: SyncedCue[];
+  summary: SyncSummary;
+  modelUsed: string | null;
+}
 export type Stage = "preparing" | "extracting" | "transcribing" | "translating" | "finishing" | "converting" | "rendering";
 
 export interface ProgressEvent {
