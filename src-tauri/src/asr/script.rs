@@ -11,6 +11,13 @@ pub fn uses_bengali_script(lang: &str) -> bool {
     matches!(lang, "bn" | "as")
 }
 
+/// Repairs Devanagari letters in a Bengali-script language: Bangla, or Assamese, which
+/// writes "ra" as ৰ instead of র.
+pub fn to_bengali_script(text: &str, lang: &str) -> String {
+    let fixed = devanagari_to_bengali(text);
+    if lang == "as" { fixed.replace('র', "ৰ") } else { fixed }
+}
+
 /// Maps Devanagari letters to their Bengali counterparts. Danda (।) and double danda
 /// (॥) are shared by both scripts and stay as they are; code points with no Bengali
 /// counterpart are left unchanged.
@@ -54,6 +61,12 @@ fn is_assigned_bengali(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assamese_writes_ra_as_its_own_letter() {
+        assert_eq!(to_bengali_script("ঘর", "as"), "ঘৰ");
+        assert_eq!(to_bengali_script("ঘর", "bn"), "ঘর");
+    }
 
     #[test]
     fn maps_devanagari_bangla_to_bengali_script() {

@@ -49,8 +49,8 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct RecentProject {
     pub path: String,
     pub name: String,
@@ -62,10 +62,18 @@ const FILE: &str = "settings.json";
 const MAX_RECENT: usize = 12;
 
 pub fn load(config_dir: &Path) -> Settings {
-    std::fs::read(config_dir.join(FILE))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    let path = config_dir.join(FILE);
+    let Ok(bytes) = std::fs::read(&path) else { return Settings::default() };
+    match serde_json::from_slice(&bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            // Keep the unreadable file next to the new one instead of overwriting it on
+            // the next save, so recent projects and keys can still be recovered.
+            log::warn!("settings file couldn't be read ({e}); keeping it as settings.broken.json");
+            let _ = std::fs::rename(&path, config_dir.join("settings.broken.json"));
+            Settings::default()
+        }
+    }
 }
 
 pub fn save(config_dir: &Path, s: &Settings) -> AppResult<()> {
@@ -96,6 +104,15 @@ mod tests {
         assert!(load(dir.path()).use_gpu);
         std::fs::write(dir.path().join(FILE), b"{broken").unwrap();
         assert_eq!(load(dir.path()).max_line_chars, 42);
+        // The unreadable file is kept aside, not overwritten by the next save.
+        assert_eq!(std::fs::read(dir.path().join("settings.broken.json")).unwrap(), b"{broken");
+    }
+
+    #[test]
+    fn a_recent_project_missing_a_field_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE), br#"{"recentProjects":[{"path":"/a.captionnest","name":"a"}]}"#).unwrap();
+        assert_eq!(load(dir.path()).recent_projects.len(), 1);
     }
 
     #[test]

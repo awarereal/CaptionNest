@@ -225,6 +225,10 @@ and re-measure instead of guessing.
   jargon (say "speech model", not "ggml"). UI polish is a primary deliverable: check UI
   changes with snapshots of the real app through the automation bridge.
 - Comments and docs explain *why*, with measured numbers where a choice came from a benchmark.
-- FFmpeg must stay LGPL-only and unmodified. After dependency changes, regenerate the
-  license list with `node scripts/licenses/collect.mjs`.
+- FFmpeg must stay LGPL-only and unmodified. After dependency changes, run
+  `node scripts/licenses/collect.mjs`: it rewrites `DEPENDENCIES.txt` and
+  `THIRD_PARTY_LICENSES.txt` (the license texts and copyright notices that BSD, ISC,
+  Zlib, MPL, Unicode and OFL packages require) in `src-tauri/resources/licenses/`.
+- Pin downloads to fixed versions: Hugging Face `resolve/<commit>/` URLs, never
+  `resolve/main/`, and GitHub Actions by commit SHA.
 - Releases stay drafts until the maintainer publishes them.

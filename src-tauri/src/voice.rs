@@ -202,7 +202,7 @@ fn classify(status: u16, body: &[u8]) -> (Option<AppError>, String) {
         401 => Some(AppError::new(ErrorCode::VoiceKey, "Deepgram didn't accept the API key. Check it in Settings → Voice typing.")),
         403 => Some(AppError::new(
             ErrorCode::VoiceKey,
-            "This Deepgram key isn't allowed to use the Bangla model. Check the key's permissions in the Deepgram console.",
+            "This Deepgram key isn't allowed to use the speech model. Check the key's permissions in the Deepgram console.",
         )),
         402 => Some(AppError::new(ErrorCode::VoiceCredits, "Your Deepgram credits have run out. Add credits in the Deepgram console, then try again.")),
         429 | 500..=599 => None,
@@ -213,6 +213,9 @@ fn classify(status: u16, body: &[u8]) -> (Option<AppError>, String) {
 }
 
 async fn listen(http: &reqwest::Client, key: &str, audio: Vec<u8>, mime: &str, lang: &str) -> AppResult<Heard> {
+    if key.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(AppError::new(ErrorCode::VoiceKey, "The Deepgram key contains spaces or line breaks. Copy it again from the Deepgram console."));
+    }
     let Some(language) = language_code(lang) else {
         return Err(AppError::new(ErrorCode::VoiceFailed, "Voice typing works in Bangla and English captions."));
     };

@@ -68,8 +68,9 @@ pub fn write_argos_marker(dir: &Path, p: &ArgosPackage) -> AppResult<()> {
 
 pub fn remove_whisper(paths: &Paths, m: &WhisperModel) -> AppResult<()> {
     let p = whisper_path(paths, m);
-    for f in [marker_path(&p), p.clone(), p.with_extension("bin.part")] {
-        match std::fs::remove_file(&f) {
+    // The model first: if it can't be deleted (in use), it stays installed and usable.
+    for f in [p.clone(), marker_path(&p), p.with_extension("bin.part")] {
+        match crate::paths::retry_io(|| std::fs::remove_file(&f)) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),

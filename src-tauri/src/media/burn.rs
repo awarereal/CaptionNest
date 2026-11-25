@@ -57,6 +57,19 @@ pub fn valid_frame_name(name: &str) -> bool {
         && name.len() > 4
 }
 
+/// The input-file messages ("can't read this file") don't fit a failure to write the
+/// new video: say where the problem is instead.
+fn output_error(e: AppError) -> AppError {
+    match e.code {
+        ErrorCode::Io | ErrorCode::FileNotFound => AppError::new(
+            ErrorCode::Io,
+            "The new video couldn't be written to that folder. Choose another folder (for example Desktop) and export again.",
+        )
+        .with_detail(e.detail.unwrap_or_default()),
+        _ => e,
+    }
+}
+
 /// The concat list: blank until each caption, the caption for its duration, blank after.
 /// Overlapping captions are trimmed so each starts after the previous one ends.
 pub fn concat_list(cues: &[FrameCue], blank: &str, duration_ms: i64) -> String {
@@ -187,7 +200,7 @@ pub async fn burn(
             }
             Ok(o) => {
                 log::warn!("burn with {name} failed: {}", o.stderr_tail);
-                last_err = Some(classify_ffmpeg_error(&o.stderr_tail));
+                last_err = Some(output_error(classify_ffmpeg_error(&o.stderr_tail)));
                 if last_err.as_ref().is_some_and(|e| matches!(e.code, ErrorCode::DiskFull)) {
                     break;
                 }

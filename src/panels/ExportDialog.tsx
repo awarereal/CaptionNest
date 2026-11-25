@@ -199,10 +199,10 @@ export function ExportDialog() {
   }
 
   if (mode === "video") {
-    const blockedReason = !media?.video
-      ? "This file has no picture, so there's nothing to draw captions on. Export an SRT instead."
-      : videoMissing
-        ? "The video isn't where it was. Locate it first, then export."
+    const blockedReason = videoMissing
+      ? "The video isn't where it was. Locate it first, then export."
+      : !media?.video
+        ? "This file has no picture, so there's nothing to draw captions on. Export an SRT instead."
         : null;
     return (
       <Modal

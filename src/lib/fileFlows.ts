@@ -6,6 +6,7 @@ import { useStore } from "../state/store";
 import { toAppError } from "./api";
 import { describeError } from "./errors";
 import { automationEnabled } from "./automation";
+import { useBurn } from "../state/burn";
 
 export const VIDEO_EXTENSIONS = [
   "mp4", "mov", "m4v", "mkv", "webm", "avi", "mts", "m2ts", "ts", "3gp", "flv", "wmv", "mpg", "mpeg",
@@ -88,6 +89,11 @@ export async function openPath(path: string) {
   const st = useStore.getState();
   if (st.job) {
     toast("Captions are still being made", { description: "Stop the current job before opening another file." });
+    return;
+  }
+  const burn = useBurn.getState().phase;
+  if (burn === "drawing" || burn === "rendering") {
+    toast("A video is being exported", { description: "Wait for it to finish, or stop it, before opening another file." });
     return;
   }
   if (!(await confirmDiscard())) return;

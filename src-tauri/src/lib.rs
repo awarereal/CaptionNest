@@ -222,6 +222,14 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
 /// A folder for the caption images of one video export. Returns its token.
 #[tauri::command]
 fn burn_begin(state: State<'_, AppState>) -> Cmd<String> {
+    // One export at a time: images left by an export stopped while drawing go now.
+    if !state.jobs.busy(JobKind::Burn) {
+        for entry in std::fs::read_dir(&state.paths.jobs).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with("burn-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
     let id = uuid::Uuid::new_v4().to_string();
     std::fs::create_dir_all(state.paths.jobs.join(format!("burn-{id}")))?;
     Ok(id)
@@ -552,6 +560,9 @@ fn cancel_download(state: State<AppState>, id: String) {
 #[tauri::command]
 async fn remove_model(app: AppHandle, id: String) -> Cmd<()> {
     off_main(&app, move |state| {
+        if state.jobs.busy(JobKind::Generate) {
+            return Err(AppError::new(ErrorCode::Io, "Captions are being made with the installed models. Remove it when that's finished."));
+        }
         if let Some(m) = catalog::whisper_model(&id) {
             return models::remove_whisper(&state.paths, m);
         }

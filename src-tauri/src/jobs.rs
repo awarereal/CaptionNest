@@ -84,6 +84,11 @@ impl Jobs {
         }
     }
 
+    /// Whether a job of `kind` is running.
+    pub fn busy(&self, kind: JobKind) -> bool {
+        self.active.lock().unwrap().contains_key(&kind)
+    }
+
     pub fn active_downloads(&self) -> Vec<String> {
         self.downloads.lock().unwrap().keys().cloned().collect()
     }

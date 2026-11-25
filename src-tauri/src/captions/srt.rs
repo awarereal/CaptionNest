@@ -43,6 +43,8 @@ pub fn to_srt(cues: &[Cue]) -> String {
 /// extra blank lines. Returns an error message naming the first bad block.
 pub fn parse_srt(input: &str) -> Result<Vec<Cue>, String> {
     let input = input.strip_prefix('\u{feff}').unwrap_or(input).replace("\r\n", "\n");
+    // Lines holding only spaces or tabs count as blank (common in hand-edited files).
+    let input = input.lines().map(|l| if l.trim().is_empty() { "" } else { l }).collect::<Vec<_>>().join("\n");
     let mut cues = Vec::new();
     for (block_no, block) in input.split("\n\n").enumerate() {
         let lines: Vec<&str> = block.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -69,6 +71,14 @@ pub fn parse_srt(input: &str) -> Result<Vec<Cue>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_separator_line_with_spaces_still_separates_captions() {
+        let text = "1\n00:00:01,000 --> 00:00:02,000\nOne\n \n2\n00:00:03,000 --> 00:00:04,000\nTwo\n";
+        let cues = parse_srt(text).unwrap();
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[1].text, "Two");
+    }
 
     fn cue(s: i64, e: i64, t: &str) -> Cue {
         Cue { check: Vec::new(), id: "x".into(), start_ms: s, end_ms: e, text: t.into() }

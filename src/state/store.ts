@@ -25,6 +25,9 @@ import type {
   Track,
 } from "../lib/types";
 
+/** The language of the last translation started, for "Try again". */
+let lastTranslateTarget: string | null = null;
+
 export type View = "loading" | "setup" | "home" | "prepare" | "workspace";
 
 export interface JobView {
@@ -94,6 +97,8 @@ interface Store {
   requestPreview: () => Promise<void>;
   startGenerate: () => Promise<void>;
   startTranslate: (target: string) => Promise<void>;
+  /** Runs the last translation again (after it failed). */
+  retryTranslate: () => void;
   cancelJob: () => Promise<void>;
   dismissJobError: () => void;
   onJobProgress: (e: ProgressEvent) => void;
@@ -296,7 +301,12 @@ export const useStore = create<Store>((set, get) => {
       }
     },
 
+    retryTranslate() {
+      if (lastTranslateTarget) void get().startTranslate(lastTranslateTarget);
+    },
+
     async startTranslate(target) {
+      lastTranslateTarget = target;
       const { project, history, settings, audioStream } = get();
       if (!project || !settings) return;
       const source = history.present.find((t) => t.kind === "original") ?? history.present[0];

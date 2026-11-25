@@ -61,7 +61,14 @@ pub struct ImportError {
 }
 
 pub fn list(dir: &Path) -> Vec<UserFont> {
-    std::fs::read(dir.join(INDEX)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    let path = dir.join(INDEX);
+    let Ok(bytes) = std::fs::read(&path) else { return Vec::new() };
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        // Set the unreadable list aside rather than replacing it with an empty one.
+        log::warn!("fonts list couldn't be read ({e}); keeping it as fonts.broken.json");
+        let _ = std::fs::rename(&path, dir.join("fonts.broken.json"));
+        Vec::new()
+    })
 }
 
 fn save(dir: &Path, fonts: &[UserFont]) -> AppResult<()> {
@@ -90,6 +97,7 @@ pub fn import(dir: &Path, paths: &[PathBuf]) -> AppResult<ImportResult> {
     }
     fonts.sort_by_key(|f| f.name.to_lowercase());
     save(dir, &fonts)?;
+    remove_unlisted(dir, &fonts);
     Ok(ImportResult { fonts, added, errors })
 }
 
@@ -129,8 +137,8 @@ fn import_one(dir: &Path, fonts: &mut Vec<UserFont>, path: &Path) -> AppResult<S
         Some(font) => {
             // A second file with the same weight and style replaces the older one.
             if let Some(old) = font.faces.iter().position(|x| x.weight == face.weight && x.italic == face.italic && x.weight_max == face.weight_max) {
-                let gone = font.faces.remove(old);
-                let _ = std::fs::remove_file(dir.join(gone.file));
+                // The old file is deleted only after the new list is saved (see `import`).
+                font.faces.remove(old);
             }
             font.faces.push(face);
             font.faces.sort_by_key(|f| (f.italic, f.weight));
@@ -144,13 +152,24 @@ pub fn remove(dir: &Path, id: &str) -> AppResult<Vec<UserFont>> {
     let _guard = LOCK.lock().unwrap();
     let mut fonts = list(dir);
     if let Some(i) = fonts.iter().position(|f| f.id == id) {
-        let font = fonts.remove(i);
-        for face in font.faces {
-            let _ = std::fs::remove_file(dir.join(face.file));
-        }
+        fonts.remove(i);
+        // Save the list first: if that fails, the files it names are still there.
         save(dir, &fonts)?;
+        remove_unlisted(dir, &fonts);
     }
     Ok(fonts)
+}
+
+/// Deletes font files no longer named in the list.
+fn remove_unlisted(dir: &Path, fonts: &[UserFont]) {
+    let keep: std::collections::HashSet<&str> = fonts.iter().flat_map(|f| f.faces.iter().map(|x| x.file.as_str())).collect();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_face = matches!(name.rsplit('.').next(), Some("ttf" | "otf" | "woff" | "woff2"));
+        if is_face && !keep.contains(name.as_str()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Reads one font file for the interface. Only names this module created are accepted.
@@ -358,11 +377,21 @@ fn weight_axis(t: &[u8]) -> Option<(u16, u16)> {
 }
 
 /// Whether the character map has `ch` (formats 4 and 12, the common Unicode ones).
+/// Each subtable is read once, and only Unicode records count, so a crafted font can't
+/// make this take long.
 fn has_char(t: &[u8], ch: u32) -> bool {
     let Some(count) = u16_at(t, 2) else { return false };
-    for i in 0..count as usize {
+    let mut seen = std::collections::HashSet::new();
+    for i in 0..(count as usize).min(64) {
         let r = 4 + i * 8;
+        let (Some(platform), Some(encoding)) = (u16_at(t, r), u16_at(t, r + 2)) else { continue };
+        if !(platform == 0 || (platform == 3 && matches!(encoding, 1 | 10))) {
+            continue;
+        }
         let Some(off) = u32_at(t, r + 4) else { continue };
+        if !seen.insert(off) {
+            continue;
+        }
         let sub = &t[(off as usize).min(t.len())..];
         let found = match u16_at(sub, 0) {
             Some(4) => format4_has(sub, ch),

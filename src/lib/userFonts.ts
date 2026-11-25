@@ -37,10 +37,16 @@ export function toCaptionFont(f: UserFont): CaptionFont {
 }
 
 const loaded = new Map<string, FontFace[]>();
+/** The files each registered font was loaded from, to notice added or replaced files. */
+const loadedFiles = new Map<string, string>();
 
 async function register(font: UserFont): Promise<void> {
-  if (loaded.has(font.id)) return;
+  const files = font.faces.map((f) => f.file).join("|");
+  if (loaded.has(font.id) && loadedFiles.get(font.id) === files) return;
+  unregister(font.id);
   const faces: FontFace[] = [];
+  // Tracked before loading, so a face that fails later can still be removed.
+  loaded.set(font.id, faces);
   const upright = font.faces.some((x) => !x.italic);
   for (const face of font.faces) {
     const bytes = await api.fontFile(face.file);
@@ -53,12 +59,13 @@ async function register(font: UserFont): Promise<void> {
     document.fonts.add(ff);
     faces.push(ff);
   }
-  loaded.set(font.id, faces);
+  loadedFiles.set(font.id, files);
 }
 
 function unregister(id: string) {
   for (const ff of loaded.get(id) ?? []) document.fonts.delete(ff);
   loaded.delete(id);
+  loadedFiles.delete(id);
 }
 
 interface FontsState {

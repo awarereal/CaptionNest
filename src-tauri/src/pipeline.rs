@@ -224,6 +224,7 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
         warnings.push(format!("unrecognized:{}", missed.len()));
         cues.extend(missed.iter().map(|&(s, e)| Cue::new(s, e, "")));
         cues.sort_by_key(|c| (c.start_ms, c.end_ms));
+        fit_placeholders(&mut cues);
     }
     let original = Track {
         id: uuid::Uuid::new_v4().to_string(),
@@ -365,11 +366,29 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
     let lang = opts.language.clone().or_else(|| t.language.clone()).unwrap_or_default();
     if !opts.translate && script::uses_bengali_script(&lang) {
         for w in &mut t.words {
-            w.text = script::devanagari_to_bengali(&w.text);
+            w.text = script::to_bengali_script(&w.text, &lang);
         }
     }
     let missed = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
     Ok((t, missed))
+}
+
+/// Empty "listen and type" captions sit between their neighbours instead of overlapping
+/// them (recognized captions are stretched to a minimum length before these are added).
+fn fit_placeholders(cues: &mut Vec<Cue>) {
+    for i in 0..cues.len() {
+        if !cues[i].text.is_empty() {
+            continue;
+        }
+        if i > 0 {
+            cues[i].start_ms = cues[i].start_ms.max(cues[i - 1].end_ms);
+        }
+        if i + 1 < cues.len() {
+            cues[i].end_ms = cues[i].end_ms.min(cues[i + 1].start_ms);
+        }
+    }
+    // A sliver too short to listen to is dropped; the speech is inside a neighbour.
+    cues.retain(|c| !c.text.is_empty() || c.end_ms - c.start_ms >= 300);
 }
 
 /// Start times (ms) of up to three speech regions spread across the video.
@@ -640,6 +659,14 @@ pub async fn probe(paths: &Paths, path: &Path) -> AppResult<probe::MediaInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listen_and_type_captions_fit_between_their_neighbours() {
+        let mut cues = vec![Cue::new(1_000, 1_820, "Hi."), Cue::new(1_500, 4_000, ""), Cue::new(3_800, 5_000, "Bye."), Cue::new(5_000, 5_100, "")];
+        fit_placeholders(&mut cues);
+        assert_eq!(cues.len(), 3, "a 100 ms sliver is dropped");
+        assert_eq!((cues[1].start_ms, cues[1].end_ms), (1_820, 3_800));
+    }
 
     #[test]
     fn detection_listens_across_the_video() {
