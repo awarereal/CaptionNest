@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::asr::{align, prompt, resync, sarvam, script, segment, vad, whisper};
+use crate::asr::{align, dips, prompt, resync, sarvam, script, segment, vad, whisper};
 use crate::captions::Cue;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::jobs::{Reporter, ScratchDir};
@@ -276,6 +276,7 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
     }
     let language = t.language.clone().or(spoken.clone()).unwrap_or_else(|| "und".into());
     let mut cues = online_cues.unwrap_or_else(|| segment::segment(&t.words, &ctx.seg, Some(req.duration_ms)));
+    snap_to_breaths(&wav, &mut cues, &ctx.seg.speech);
     if cues.is_empty() && missed.is_empty() {
         return Err(AppError::new(
             ErrorCode::NoSpeech,
@@ -456,6 +457,7 @@ pub async fn resync_captions(paths: &Paths, req: ResyncRequest, job_id: &str, ca
         let _ = std::fs::write(Path::new(&dir).join("resync-heard.json"), serde_json::to_vec(&rows).unwrap_or_default());
         let _ = std::fs::write(Path::new(&dir).join("resync-regions.json"), serde_json::to_vec(&edges).unwrap_or_default());
     }
+    snap_synced_to_breaths(&wav, &mut cues, &req.cues, &edges);
     log::info!("auto-sync: {:?}, {} matched, {} estimated, {} not found", summary.kind, summary.matched, summary.estimated, summary.unmatched);
     Ok(ResyncResult { cues, summary, model_used })
 }
@@ -624,6 +626,42 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
     }
     let missed = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
     Ok((t, missed))
+}
+
+/// Caption starts inside continuous speech move to the short breath before them (see
+/// `asr/dips.rs`); starts after a pause are exact already and stay.
+fn snap_to_breaths(wav: &Path, cues: &mut [Cue], speech: &[(i64, i64)]) {
+    let Ok(levels) = dips::frame_levels(wav) else { return };
+    let found = dips::find(&levels, speech);
+    cues.sort_by_key(|c| (c.start_ms, c.end_ms));
+    let moved = dips::snap(cues, &found, speech);
+    log::info!("caption edges moved to breaths: {moved} of {}", cues.len());
+}
+
+/// Auto-sync's times, with the same breath placement. Captions outside the synced
+/// section, or that couldn't be heard, keep the times auto-sync gave them.
+fn snap_synced_to_breaths(wav: &Path, synced: &mut [resync::Synced], cues: &[Cue], speech: &[(i64, i64)]) {
+    let text: std::collections::HashMap<&str, &str> = cues.iter().map(|c| (c.id.as_str(), c.text.as_str())).collect();
+    let mut order: Vec<usize> = (0..synced.len()).filter(|&i| synced[i].status != resync::Status::Outside).collect();
+    order.sort_by_key(|&i| (synced[i].start_ms, synced[i].end_ms));
+    let mut work: Vec<Cue> = order
+        .iter()
+        .map(|&i| {
+            let s = &synced[i];
+            Cue { id: s.id.clone(), start_ms: s.start_ms, end_ms: s.end_ms, text: text.get(s.id.as_str()).unwrap_or(&"").to_string(), ..Cue::new(0, 0, "") }
+        })
+        .collect();
+    snap_to_breaths(wav, &mut work, speech);
+    let by_id: std::collections::HashMap<&str, (i64, i64)> = work.iter().map(|c| (c.id.as_str(), (c.start_ms, c.end_ms))).collect();
+    for &i in &order {
+        if synced[i].status == resync::Status::Unmatched {
+            continue;
+        }
+        if let Some(&(a, b)) = by_id.get(synced[i].id.as_str()) {
+            synced[i].start_ms = a;
+            synced[i].end_ms = b;
+        }
+    }
 }
 
 /// Empty "listen and type" captions sit between their neighbours instead of overlapping
