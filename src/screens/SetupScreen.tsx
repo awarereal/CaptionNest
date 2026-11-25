@@ -2,11 +2,9 @@ import { ArrowRight, ShieldCheck, Globe, HardDrives } from "@phosphor-icons/reac
 import { useStore } from "../state/store";
 import { ModelCard } from "../components/ModelCard";
 import { Button, formatBytes } from "../components/ui";
-import { recommendedModelId } from "../lib/models";
+import { recommendedBanglaId, recommendedModelId, sortModels } from "../lib/models";
 import { LogoMark } from "../components/Logo";
 
-const ORDER = ["large-v3-q5_0", "large-v3-turbo-q5_0", "small"];
-const order = (rec: string) => [rec, ...ORDER.filter((id) => id !== rec), "large-v3-turbo-bn-q5_0", "large-v3-bn-q5_0"];
 
 export function SetupScreen() {
   const models = useStore((s) => s.models);
@@ -15,7 +13,7 @@ export function SetupScreen() {
   const recommended = recommendedModelId(info);
   const update = useStore((s) => s.updateSettings);
   const setView = useStore((s) => s.setView);
-  const whisper = [...(models?.whisper ?? [])].sort((a, b) => order(recommended).indexOf(a.id) - order(recommended).indexOf(b.id));
+  const whisper = sortModels(models?.whisper ?? [], recommended);
   const installed = whisper.filter((m) => m.installed && !m.language);
   const ready = installed.length > 0;
 
@@ -48,7 +46,7 @@ export function SetupScreen() {
             <ModelCard
               key={m.id}
               entry={m}
-              recommended={m.id === recommended}
+              recommended={m.id === recommended || m.id === recommendedBanglaId(info)}
               selected={settings?.transcribeModelId === m.id}
               onUse={() => void update({ transcribeModelId: m.id })}
             />

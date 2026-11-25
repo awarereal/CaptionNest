@@ -23,6 +23,9 @@ pub struct WhisperModel {
     /// speech in that language.
     #[serde(default)]
     pub language: Option<String>,
+    /// For language models: whether the language's punctuation prompt improves it.
+    #[serde(default)]
+    pub prompt: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

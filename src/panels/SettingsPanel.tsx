@@ -5,7 +5,7 @@ import { useStore } from "../state/store";
 import { ModelCard, DownloadStatus } from "../components/ModelCard";
 import { Button, Modal, Switch, formatBytes } from "../components/ui";
 import { language } from "../lib/languages";
-import { recommendedModelId } from "../lib/models";
+import { recommendedBanglaId, recommendedModelId, sortModels } from "../lib/models";
 import type { ArgosEntry } from "../lib/types";
 
 const SECTIONS = [
@@ -75,11 +75,11 @@ function ModelsSection() {
         Models turn speech into text on this computer. Downloaded once from Hugging Face, then used offline.
       </SectionHead>
       <div className="settings__models">
-        {(models?.whisper ?? []).map((m) => (
+        {sortModels(models?.whisper ?? [], rec).map((m) => (
           <ModelCard
             key={m.id}
             entry={m}
-            recommended={m.id === rec}
+            recommended={m.id === rec || m.id === recommendedBanglaId(info)}
             selected={settings?.transcribeModelId === m.id}
             onUse={() => void update({ transcribeModelId: m.id })}
             compact={false}

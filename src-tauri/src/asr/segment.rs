@@ -60,6 +60,7 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
     if !cur.is_empty() {
         groups.push(cur);
     }
+    rebalance_tails(&mut groups, opts);
 
     let mut cues: Vec<Cue> = groups
         .iter()
@@ -72,6 +73,40 @@ pub fn segment(words: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec
         .collect();
     fix_timing(&mut cues, opts, media_end_ms);
     cues
+}
+
+/// When a long sentence spills over, the greedy split can leave a lonely last word
+/// ("হয়।") as its own caption. Share the words of the two captions evenly instead.
+fn rebalance_tails(groups: &mut [Vec<&Word>], opts: &Options) {
+    for i in 1..groups.len() {
+        let (head, tail) = groups.split_at_mut(i);
+        let (prev, last) = (&mut head[i - 1], &mut tail[0]);
+        let last_text = join(last);
+        let prev_text = join(prev);
+        let same_sentence = !ends_with_any(prev_text.trim_end(), SENTENCE_END);
+        let close = last.first().zip(prev.last()).is_some_and(|(a, b)| a.start_ms - b.end_ms < 400);
+        if !(same_sentence && close && graphemes(&last_text) < 14 && last.len() <= 2) {
+            continue;
+        }
+        let all: Vec<&Word> = prev.iter().chain(last.iter()).copied().collect();
+        let total: usize = all.iter().map(|w| graphemes(w.text.trim()) + 1).sum();
+        let limit = line_limit(&join(&all), opts.max_line_chars) * opts.max_lines;
+        // Split where the left part first reaches half the text, keeping both within limits.
+        let mut acc = 0;
+        let mut cut = all.len() - last.len();
+        for (k, w) in all.iter().enumerate() {
+            acc += graphemes(w.text.trim()) + 1;
+            if acc * 2 >= total {
+                cut = (k + 1).min(all.len() - 1).max(1);
+                break;
+            }
+        }
+        let (a, b) = all.split_at(cut);
+        if graphemes(&join(a)) <= limit && graphemes(&join(b)) <= limit {
+            *prev = a.to_vec();
+            *last = b.to_vec();
+        }
+    }
 }
 
 /// Below this confidence a word is listed for the user to check.
@@ -236,7 +271,24 @@ fn join(words: &[&Word]) -> String {
     for w in words {
         s.push_str(&w.text);
     }
-    s.trim().to_string()
+    space_after_sentence_marks(s.trim())
+}
+
+/// Whisper sometimes glues the next word to a sentence mark ("হের।এমএস").
+fn space_after_sentence_marks(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if matches!(c, '।' | '॥' | '؟' | '?' | '!') {
+            if let Some(n) = chars.peek() {
+                if n.is_alphanumeric() {
+                    out.push(' ');
+                }
+            }
+        }
+    }
+    out
 }
 
 fn ends_with_any(s: &str, set: &[char]) -> bool {
@@ -443,6 +495,26 @@ mod tests {
         w[1].confidence = 0.31;
         let cues = segment(&w, &Options::default(), None);
         assert_eq!(cues[0].check, vec!["বাংলাজ".to_string()]);
+    }
+
+    #[test]
+    fn sentence_tail_is_not_left_alone() {
+        // A long Bangla sentence whose last word would otherwise be its own caption.
+        let text = ["এটিকে", "মঙ্গলবার", "কেটে", "ফেলার", "কথা", "ছিল,", "তবে", "আদালতে", "জরুরি", "রায়", "আসার", "পরে", "এটি", "বাঁচানো", "হয়।"];
+        let w: Vec<Word> = text.iter().enumerate().map(|(i, t)| Word { confidence: 1.0, start_ms: i as i64 * 450, end_ms: i as i64 * 450 + 400, text: format!(" {t}") }).collect();
+        // 6.7 s of speech: the 6 s caption limit forces a split near the end.
+        let opts = Options::default();
+        let cues = segment(&w, &opts, None);
+        assert!(cues.len() >= 2, "{cues:?}");
+        assert!(cues.iter().all(|c| graphemes(&c.text) >= 14), "{cues:?}");
+        let joined: String = cues.iter().map(|c| c.text.replace('\n', " ")).collect::<Vec<_>>().join(" ");
+        assert!(joined.ends_with("বাঁচানো হয়।"));
+    }
+
+    #[test]
+    fn adds_space_after_danda() {
+        assert_eq!(space_after_sentence_marks("হের।এমএস পরিচিত"), "হের। এমএস পরিচিত");
+        assert_eq!(space_after_sentence_marks("Done. 3.5 ok!Yes"), "Done. 3.5 ok! Yes");
     }
 
     #[test]

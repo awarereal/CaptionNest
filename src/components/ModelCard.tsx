@@ -1,4 +1,4 @@
-import { CheckCircle, DownloadSimple, Stop, Trash, ArrowClockwise, Translate, Prohibit } from "@phosphor-icons/react";
+import { CheckCircle, DownloadSimple, Stop, Trash, ArrowClockwise, Translate, Prohibit, Waveform } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { MODEL_INFO } from "../lib/models";
 import type { WhisperModelEntry } from "../lib/types";
@@ -69,7 +69,7 @@ export function ModelCard({
     <article className={`model ${selected ? "is-selected" : ""} ${entry.installed ? "is-installed" : ""} ${compact ? "model--compact" : ""}`}>
       <header className="model__head">
         <h3 className="model__name display">{info?.name ?? entry.id}</h3>
-        {recommended && <Badge tone="gold">Recommended</Badge>}
+        {recommended && <Badge tone="gold">{entry.language ? "Best for Bangla" : "Recommended"}</Badge>}
         {entry.language === "bn" && <Badge tone="teal">For Bangla</Badge>}
         {entry.installed && selected && !entry.language && <Badge tone="teal">In use</Badge>}
       </header>
@@ -82,7 +82,7 @@ export function ModelCard({
       )}
       <ul className="model__facts">
         <li>
-          {info?.translates ? <Translate size={15} /> : <Prohibit size={15} />}
+          {entry.language ? <Waveform size={15} /> : info?.translates ? <Translate size={15} /> : <Prohibit size={15} />}
           {entry.language === "bn"
             ? "Used automatically for Bangla speech"
             : info?.translates
@@ -117,7 +117,7 @@ export function ModelCard({
           <>
             {failed && <DownloadStatus id={entry.id} total={entry.sizeBytes} />}
             <Button
-              variant={recommended ? "primary" : "secondary"}
+              variant={recommended && !entry.language ? "primary" : "secondary"}
               icon={failed || resumable ? <ArrowClockwise size={16} /> : <DownloadSimple size={16} weight="bold" />}
               onClick={() => void download(entry.id)}
             >

@@ -118,7 +118,8 @@ function CaptionOptions() {
   const model = installedWhisper.find((m) => m.id === settings.transcribeModelId && !m.language) ?? installedWhisper.find((m) => !m.language);
   const translator = installedWhisper.find((m) => MODEL_INFO[m.id]?.translates);
   const accurate = models?.whisper.find((m) => m.id === "large-v3-q5_0");
-  const banglaModel = languageModelFor(models?.whisper, "bn");
+  const info = useStore((s) => s.info);
+  const banglaModel = languageModelFor(models?.whisper, "bn", info);
 
   // Argos targets: languages captions can be translated into.
   const argosTargets = useMemo(() => {

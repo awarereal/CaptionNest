@@ -71,14 +71,38 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
 
 export const DEFAULT_MODEL_ID = "large-v3-q5_0";
 
+const DISPLAY_ORDER = ["large-v3-q5_0", "large-v3-turbo-q5_0", "small", "large-v3-turbo-bn-q5_0", "large-v3-bn-q5_0"];
+
+/** Models in display order, with the recommended one first. */
+export function sortModels<T extends { id: string }>(models: T[], recommended: string): T[] {
+  const order = [recommended, ...DISPLAY_ORDER.filter((id) => id !== recommended)];
+  const rank = (id: string) => (order.indexOf(id) < 0 ? 99 : order.indexOf(id));
+  return [...models].sort((a, b) => rank(a.id) - rank(b.id));
+}
+
 /** The model to suggest first on this computer. */
 export function recommendedModelId(info: AppInfo | null): string {
   if (info?.os === "macos" && info.arch === "aarch64") return "large-v3-q5_0";
   return "large-v3-turbo-q5_0";
 }
 
-/** The installed-or-not model trained for a language, if the catalog has one. */
-export const languageModelFor = <T extends { language?: string | null }>(models: T[] | undefined, lang: string) =>
-  (models ?? []).find((m) => m.language === lang);
+/** The Bangla model to suggest: Max where a GPU makes it fast enough. */
+export function recommendedBanglaId(info: AppInfo | null): string {
+  if (info?.os === "macos" && info.arch === "aarch64") return "large-v3-bn-q5_0";
+  return "large-v3-turbo-bn-q5_0";
+}
+
+/**
+ * The model trained for a language: an installed one if any, otherwise the one to
+ * suggest for this computer.
+ */
+export function languageModelFor<T extends { id: string; language?: string | null; installed?: boolean }>(
+  models: T[] | undefined,
+  lang: string,
+  info: AppInfo | null = null,
+): T | undefined {
+  const list = (models ?? []).filter((m) => m.language === lang);
+  return list.find((m) => m.installed) ?? list.find((m) => m.id === recommendedBanglaId(info)) ?? list[0];
+}
 
 export const modelName = (id: string | null | undefined) => (id && MODEL_INFO[id]?.name) || id || "No model";

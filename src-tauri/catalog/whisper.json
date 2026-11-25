@@ -37,7 +37,8 @@
    "canTranslate": false,
    "role": "transcribe",
    "language": "bn",
-   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-bn (Apache-2.0), converted to ggml q5_0"
+   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-bn (Apache-2.0), converted to ggml q5_0",
+   "prompt": false
   },
   {
    "id": "large-v3-turbo-bn-q5_0",
@@ -48,7 +49,8 @@
    "canTranslate": false,
    "role": "transcribe",
    "language": "bn",
-   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-turbo-bn (Apache-2.0), converted to ggml q5_0"
+   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-turbo-bn (Apache-2.0), converted to ggml q5_0",
+   "prompt": true
   }
  ]
 }

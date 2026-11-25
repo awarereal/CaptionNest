@@ -138,16 +138,22 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     }
     // A model trained for this language (e.g. Bangla) spells it far better than the
     // general model; use it when installed and allowed.
-    let mut specialised = None;
+    let mut specialised: Option<String> = None;
+    let mut specialised_prompt = false;
     if req.use_language_models.unwrap_or(true) && req.model_path_override.is_none() {
         if let Some(lang) = opts.language.as_deref() {
             if let Some(m) = catalog::language_models(lang).find(|m| models::whisper_installed(paths, m)) {
                 opts.model = models::whisper_path(paths, m);
                 specialised = Some(m.id.clone());
+                specialised_prompt = m.prompt;
             }
         }
     }
-    opts.prompt = if specialised.is_some() { None } else { opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string) };
+    opts.prompt = if specialised.is_some() && !specialised_prompt {
+        None
+    } else {
+        opts.language.as_deref().and_then(prompt::initial_prompt).map(str::to_string)
+    };
     let ctx = Ctx { speech, ..ctx };
     let (t, missed) = recognize(&ctx, &wav, &opts, req.duration_ms).await?;
     let mut warnings: Vec<String> = uncertain.into_iter().collect();
