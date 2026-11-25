@@ -112,11 +112,8 @@ fn get_settings(state: State<AppState>) -> UiSettings {
 #[tauri::command]
 async fn save_online_key(app: AppHandle, key: String) -> Cmd<UiSettings> {
     let key = key.trim().to_string();
-    if key.is_empty() {
-        return Err(AppError::new(ErrorCode::OnlineKey, "Paste your Sarvam API key first."));
-    }
-    let http = app.state::<AppState>().http.clone();
-    asr::sarvam::check_key(&asr::sarvam::Online { key: key.clone(), http }).await?;
+    // The same check the settings screen used before (it also rejects an empty key).
+    check_online_key(app.state::<AppState>(), key.clone()).await?;
     off_main(&app, move |state| {
         let mut s = state.settings.lock().unwrap();
         let next = settings::Settings { sarvam_api_key: Some(key), online_recognition: true, ..s.clone() };
