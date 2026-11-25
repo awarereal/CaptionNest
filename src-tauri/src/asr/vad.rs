@@ -142,6 +142,71 @@ pub fn plan_chunks(speech: &[(i64, i64)], max_ms: i64, join_gap_ms: i64, pad_ms:
     padded
 }
 
+/// Every word was heard in one chunk, so it was spoken in that chunk's speech: a word
+/// the model timed in the silence around it (the pad before or after, or a gap inside)
+/// is moved into the speech. After this, a word's time says which stretch it's in.
+pub fn confine_to_chunks(words: &mut [Word], chunks: &[(i64, i64)], speech: &[(i64, i64)]) {
+    let mut chunks = chunks.to_vec();
+    chunks.sort_unstable();
+    for w in words.iter_mut() {
+        let k = chunks.partition_point(|c| c.0 <= w.start_ms);
+        let Some(&(from, to)) = k.checked_sub(1).and_then(|k| chunks.get(k)).filter(|c| w.start_ms < c.1) else { continue };
+        let inside: Vec<(i64, i64)> = speech.iter().copied().filter(|r| r.1 > from && r.0 < to).collect();
+        let (Some(first), Some(last)) = (inside.first(), inside.last()) else { continue };
+        let mut at = w.start_ms.clamp(first.0, (last.1 - 1).max(first.0));
+        if let Some(next) = inside.iter().find(|r| r.1 > at) {
+            at = at.max(next.0);
+        }
+        w.end_ms = (w.end_ms + (at - w.start_ms)).max(at + 1);
+        w.start_ms = at;
+    }
+}
+
+/// Chunks for online recognition, which returns one time span per chunk: every chunk is
+/// one stretch of speech between real pauses, so its text is pinned to when it was said.
+///   - speech separated by a pause shorter than `join_gap_ms` stays together (a breath
+///     inside a sentence), up to `max_ms`;
+///   - a very short piece (under 1.2 s) joins its closer neighbour across a pause of up
+///     to 1.5 s, because a recognizer needs some context;
+///   - anything longer than `max_ms` is cut into equal parts.
+pub fn plan_pause_chunks(speech: &[(i64, i64)], max_ms: i64, join_gap_ms: i64, pad_ms: i64, total_ms: i64) -> Vec<(i64, i64)> {
+    let mut pieces: Vec<(i64, i64)> = Vec::new();
+    for &(s, e) in speech {
+        match pieces.last_mut() {
+            Some(last) if s - last.1 < join_gap_ms && e - last.0 <= max_ms => last.1 = e,
+            _ => pieces.push((s, e)),
+        }
+    }
+    // Short pieces join the closer neighbour.
+    let mut i = 0;
+    while i < pieces.len() {
+        let (s, e) = pieces[i];
+        if e - s >= 1_200 || pieces.len() == 1 {
+            i += 1;
+            continue;
+        }
+        let before = (i > 0).then(|| (s - pieces[i - 1].1, e - pieces[i - 1].0));
+        let after = (i + 1 < pieces.len()).then(|| (pieces[i + 1].0 - e, pieces[i + 1].1 - s));
+        let ok = |x: Option<(i64, i64)>| x.filter(|&(gap, len)| gap <= 1_500 && len <= max_ms);
+        match (ok(before), ok(after)) {
+            (Some((gb, _)), Some((ga, _))) if ga < gb => {
+                pieces[i + 1].0 = s;
+                pieces.remove(i);
+            }
+            (Some(_), _) => {
+                pieces[i - 1].1 = e;
+                pieces.remove(i);
+            }
+            (None, Some(_)) => {
+                pieces[i + 1].0 = s;
+                pieces.remove(i);
+            }
+            (None, None) => i += 1,
+        }
+    }
+    plan_chunks(&pieces, max_ms, 0, pad_ms, total_ms)
+}
+
 /// Stretches of speech (at least `min_ms` long) that no recognized word overlaps.
 /// Used to catch audio Whisper skipped, so no speech goes uncaptioned silently.
 pub fn uncovered(speech: &[(i64, i64)], words: &[Word], slack_ms: i64, min_ms: i64) -> Vec<(i64, i64)> {
@@ -230,5 +295,40 @@ mod tests {
         assert!(chunks.iter().all(|(a, b)| b - a <= 25_000 + 500), "{chunks:?}");
         // Parts of one stretch touch without overlapping.
         assert!(chunks.windows(2).all(|w| w[0].1 <= w[1].0), "{chunks:?}");
+    }
+
+    #[test]
+    fn online_chunks_never_run_across_a_real_pause() {
+        // Another voice 0-5.2 s, a 0.9 s pause, then the narration; a breath at 8 s.
+        let speech = [(0, 5_200), (6_100, 8_000), (8_250, 10_500), (14_000, 14_400), (15_000, 19_000)];
+        let chunks = plan_pause_chunks(&speech, 12_000, 600, 200, 20_000);
+        // 0-5.2 alone; 6.1-10.5 together (0.25 s breath); the 0.4 s word joins what follows.
+        assert_eq!(chunks.len(), 3, "{chunks:?}");
+        assert!(chunks[0].1 <= 5_650 && chunks[1].0 >= 5_650, "{chunks:?}");
+        assert!(chunks[1].0 <= 6_100 && chunks[1].1 >= 10_500, "{chunks:?}");
+        assert!(chunks[2].0 <= 14_000 && chunks[2].1 >= 19_000, "{chunks:?}");
+        assert!(chunks.windows(2).all(|w| w[0].1 <= w[1].0), "{chunks:?}");
+    }
+
+    #[test]
+    fn online_chunks_stay_under_the_limit() {
+        let speech = [(0, 9_500), (9_700, 19_000), (19_100, 28_000)];
+        let chunks = plan_pause_chunks(&speech, 12_000, 600, 200, 30_000);
+        assert!(chunks.iter().all(|(a, b)| b - a <= 12_400), "{chunks:?}");
+        assert_eq!(chunks.len(), 3, "{chunks:?}");
+    }
+
+    #[test]
+    fn words_timed_in_silence_move_into_their_chunks_speech() {
+        let w = |s, e| Word { start_ms: s, end_ms: e, text: " x".into(), confidence: 1.0 };
+        // Two chunks: speech 1.0-2.3 s (chunk 0.85-2.45) and 2.6-4.0 s (chunk 2.45-4.15).
+        let chunks = [(2_450, 4_150), (850, 2_450)];
+        let speech = [(1_000, 2_300), (2_600, 4_000)];
+        let mut words = vec![w(900, 1_100), w(1_500, 1_900), w(2_400, 2_440), w(2_500, 2_900), w(4_100, 4_140), w(9_000, 9_300)];
+        confine_to_chunks(&mut words, &chunks, &speech);
+        // Leading pad: to the onset. In speech: untouched. Trailing pad: stays in ITS
+        // chunk's speech (not pushed to the next). Next chunk's leading pad: its onset.
+        // Trailing pad of the last chunk: inside. Outside every chunk: left alone.
+        assert_eq!(words.iter().map(|w| w.start_ms).collect::<Vec<_>>(), vec![1_000, 1_500, 2_299, 2_600, 3_999, 9_000]);
     }
 }

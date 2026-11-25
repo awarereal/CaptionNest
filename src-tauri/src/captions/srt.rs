@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     fn cue(s: i64, e: i64, t: &str) -> Cue {
-        Cue { check: Vec::new(), id: "x".into(), start_ms: s, end_ms: e, text: t.into() }
+        Cue { check: Vec::new(), timing_check: false, id: "x".into(), start_ms: s, end_ms: e, text: t.into() }
     }
 
     #[test]

@@ -42,6 +42,14 @@ def shot(path):
     return path
 
 
+def resize(width, height):
+    """Resizes the app window (logical pixels)."""
+    r = _post("/resize", f"{width}x{height}")
+    if not r["ok"]:
+        raise RuntimeError(r["value"])
+    time.sleep(0.4)
+
+
 def wait(js, timeout=60.0, every=0.5):
     end = time.time() + timeout
     while time.time() < end:

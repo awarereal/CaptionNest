@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Play, Scissors, ArrowsMergeIcon, Trash, WarningCircle, Eye, Check } from "@phosphor-icons/react";
+import { Play, Scissors, ArrowsMergeIcon, Trash, WarningCircle, Eye, Check, Clock } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
 import { VOICE_LANGUAGES, useVoice } from "../state/voice";
@@ -128,6 +128,7 @@ const CueRow = memo(function CueRow({
   const merge = useStore((s) => s.mergeCue);
   const remove = useStore((s) => s.deleteCue);
   const markChecked = useStore((s) => s.markChecked);
+  const markTimingChecked = useStore((s) => s.markTimingChecked);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
   const phon = usePhonetic(textRef, phonetic, (text) => setText(cue.id, text));
@@ -182,7 +183,7 @@ const CueRow = memo(function CueRow({
     if (ms < cue.startMs || ms >= cue.endMs) seek(cue.startMs);
   };
 
-  const cls = ["cue", active && "is-active", selected && "is-selected", overlap && "is-overlap", (empty || invalid) && "is-problem", toCheck.length > 0 && "has-check"]
+  const cls = ["cue", active && "is-active", selected && "is-selected", overlap && "is-overlap", (empty || invalid) && "is-problem", (toCheck.length > 0 || cue.timingCheck) && "has-check"]
     .filter(Boolean)
     .join(" ");
 
@@ -192,7 +193,7 @@ const CueRow = memo(function CueRow({
       data-cue-id={cue.id}
       onMouseDown={(e) => {
         select(cue.id);
-        if (!(e.target as HTMLElement).closest("input,button")) seekHere();
+        if (!(e.target instanceof Element && e.target.closest("input,button"))) seekHere();
       }}
       onFocus={() => select(cue.id)}
     >
@@ -243,6 +244,17 @@ const CueRow = memo(function CueRow({
           {phon.comp && <PhoneticStrip comp={phon.comp} onChoose={phon.choose} />}
         </div>
         {voiceHere && <VoiceBar />}
+        {cue.timingCheck && (
+          <div className="cue__check" role="group" aria-label="Timing to check">
+            <span className="cue__check-label">
+              <Clock size={13} /> Check timing
+            </span>
+            <span className="cue__check-note">Auto-sync couldn't hear this caption clearly.</span>
+            <button className="cue__ok" onClick={() => markTimingChecked(cue.id)}>
+              <Check size={13} weight="bold" /> Looks right
+            </button>
+          </div>
+        )}
         {toCheck.length > 0 && (
           <div className="cue__check" role="group" aria-label="Words to check">
             <span className="cue__check-label">

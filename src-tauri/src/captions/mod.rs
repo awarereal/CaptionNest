@@ -17,10 +17,17 @@ pub struct Cue {
     /// Words the recognizer was unsure about, for the user to check. Never exported.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub check: Vec<String>,
+    /// Auto-sync couldn't confirm this caption's time: the user should look at it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub timing_check: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl Cue {
     pub fn new(start_ms: i64, end_ms: i64, text: impl Into<String>) -> Self {
-        Self { id: uuid::Uuid::new_v4().to_string(), start_ms, end_ms, text: text.into(), check: Vec::new() }
+        Self { id: uuid::Uuid::new_v4().to_string(), start_ms, end_ms, text: text.into(), check: Vec::new(), timing_check: false }
     }
 }

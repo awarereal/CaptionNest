@@ -501,6 +501,12 @@
   display: grid;
   gap: 8px;
   justify-items: center;
+  /* Always in view at the bottom of the panel, however short the window. */
+  position: sticky;
+  bottom: -22px;
+  margin-bottom: -22px;
+  padding: 14px 0 22px;
+  background: linear-gradient(to bottom, transparent, var(--slate) 22px);
 }
 
 .options__go .btn {
@@ -737,7 +743,16 @@
   word-break: break-word;
 }
 
+/* Options beside the video down to the smallest window, so Generate is always in view. */
 @media (max-width: 1020px) {
+  .prepare {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 14px;
+    padding: 14px;
+  }
+}
+
+@media (max-width: 860px) {
   .prepare {
     grid-template-columns: 1fr;
     height: auto;
