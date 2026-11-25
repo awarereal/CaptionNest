@@ -337,3 +337,13 @@ export interface Heard {
   text: string;
   confidence: number;
 }
+
+/** Live voice typing (Rust: voice_live::LiveEvent). */
+export interface VoiceLiveEvent {
+  id: number;
+  /** "words": a running guess, or final words when `isFinal`; "end": nothing more comes. */
+  kind: "words" | "end" | "error";
+  text: string;
+  isFinal: boolean;
+  error: AppError | null;
+}

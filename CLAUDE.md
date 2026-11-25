@@ -253,12 +253,16 @@ and re-measure instead of guessing.
   `lib/banglaWords.ts`. `components/usePhonetic.ts` wires it into the caption textarea.
   It keeps the roman letters of the word being typed and re-spells the whole word on
   every key.
-- **Voice typing**: `src/state/voice.ts` records with `getUserMedia` and `MediaRecorder`,
-  then sends the whole recording as raw bytes to `transcribe_voice`. `src-tauri/src/voice.rs`
-  calls Deepgram's pre-recorded API (`model=nova-3&language=bn&smart_format=true`; see
-  docs/VERIFICATION.md). The Deepgram key lives in `config/voice.json`, separate from
-  `settings.json`, and never reaches the web view. Words are inserted with
-  `lib/insertWords.ts`, which never replaces text that changed during recording.
+- **Voice typing** is live: `src/state/voice.ts` turns the microphone into 16 kHz 16-bit
+  PCM (a ScriptProcessor on an `AudioContext`) and sends ~128 ms pieces, numbered, to
+  `voice_live_audio`; `src-tauri/src/voice_live.rs` streams them over a WebSocket to
+  Deepgram (`interim_results`, `endpointing=300`, KeepAlive) and emits `voice-live` events.
+  The running guess and final words are written into the caption at the cursor as you speak
+  (`lib/insertWords.ts` from the caption text at the start; Cancel takes them out; editing the
+  caption meanwhile ends dictation). The whole recording is kept with `MediaRecorder` too:
+  if the live connection fails, it goes to `transcribe_voice` (Deepgram pre-recorded,
+  `voice.rs`) after Stop. The Deepgram key lives in `config/voice.json`, separate from
+  `settings.json`, and never reaches the web view.
 - WKWebView offers `navigator.mediaDevices` only when the app's Info.plist has
   `NSMicrophoneUsageDescription` (`src-tauri/Info.plist`). Tauri embeds that file only in
   dev builds (no `custom-protocol` feature); bundles merge it. A bare

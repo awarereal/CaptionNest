@@ -17,6 +17,7 @@ mod settings;
 mod theme;
 mod translate;
 mod voice;
+mod voice_live;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -37,6 +38,8 @@ pub struct AppState {
     http: reqwest::Client,
     /// The Deepgram key for voice typing (never sent to the web view).
     voice: voice::VoiceKey,
+    /// Live voice typing: the open stream to Deepgram, if any.
+    live: voice_live::Live,
     self_test: bool,
 }
 
@@ -385,6 +388,43 @@ async fn transcribe_voice(state: State<'_, AppState>, request: tauri::ipc::Reque
         return Err(AppError::new(ErrorCode::VoiceKey, "Add your Deepgram API key in Settings → Voice typing to use voice typing."));
     };
     voice::transcribe(&state.http, &key, bytes.clone(), &mime, &language).await
+}
+
+/// Starts live voice typing: opens Deepgram's streaming recognition. Words arrive as
+/// `voice-live` events while the microphone's sound comes in through `voice_live_audio`.
+#[tauri::command]
+async fn start_voice_live(app: AppHandle, state: State<'_, AppState>, language: String, sample_rate: u32) -> Cmd<u64> {
+    let Some(key) = state.voice.get() else {
+        return Err(AppError::new(ErrorCode::VoiceKey, "Add your Deepgram API key in Settings → Voice typing to use voice typing."));
+    };
+    state.live.start(app.clone(), &key, &language, sample_rate.clamp(8_000, 48_000)).await
+}
+
+/// Microphone sound for a live dictation: raw 16-bit PCM bytes; the dictation id and the
+/// piece's number in `x-live-id` and `x-live-seq`.
+#[tauri::command]
+async fn voice_live_audio(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Cmd<()> {
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+    let (Some(id), Some(seq)) = (header("x-live-id"), header("x-live-seq")) else {
+        return Err(AppError::internal("the sound piece has no dictation id or number"));
+    };
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::internal("the sound must be sent as bytes"));
+    };
+    state.live.audio(id, seq, bytes.clone());
+    Ok(())
+}
+
+#[tauri::command]
+async fn finish_voice_live(state: State<'_, AppState>, id: u64) -> Cmd<()> {
+    state.live.finish(id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn cancel_voice_live(state: State<'_, AppState>, id: u64) -> Cmd<()> {
+    state.live.cancel(id);
+    Ok(())
 }
 
 // ---------- generation ----------
@@ -765,6 +805,7 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 http: models::download::client(),
                 voice,
+                live: voice_live::Live::default(),
                 self_test: is_self_test,
             });
             if let Some(test) = self_test.clone() {
@@ -816,6 +857,10 @@ pub fn run() {
             save_voice_key,
             remove_voice_key,
             transcribe_voice,
+            start_voice_live,
+            voice_live_audio,
+            finish_voice_live,
+            cancel_voice_live,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CaptionNest");

@@ -101,6 +101,13 @@ key is reported as `401 INVALID_AUTH` → "Deepgram didn't accept the API key".
 
 In the app (dev build, automation bridge) a recording fed in through a stand-in
 microphone went Listening → Processing → inserted at the cursor as one undo step.
+
+Live (words while you speak, November 2026): Deepgram's streaming API with Nova-3 `bn`,
+fed 20 s of the Bangla phrase recording at speaking pace (`voice_live::tests::live_streaming_words`):
+first words after 1.4 s, a corrected guess about every second, final words at each pause.
+In the app with a stand-in microphone: the first words were in the caption 2.3-4.6 s after
+pressing the microphone (connecting included), 19 updates while speaking, all 35 words in
+place after Stop, the caption's own text kept; Cancel took the live words out again.
 A real microphone was not exercised by automation; macOS needs `NSMicrophoneUsageDescription`
 (now in `src-tauri/Info.plist`) for the web view to offer the microphone at all.
 

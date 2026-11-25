@@ -21,6 +21,7 @@ import type {
   Track,
   UserFont,
   ValidationReport,
+  VoiceLiveEvent,
   VoiceStatus,
 } from "./types";
 
@@ -139,6 +140,19 @@ export const api = {
   voiceStatus: () => call<VoiceStatus>("voice_status"),
   saveVoiceKey: (key: string) => call<VoiceStatus>("save_voice_key", { key }),
   removeVoiceKey: () => call<VoiceStatus>("remove_voice_key"),
+  /** Opens live voice typing; words arrive through onVoiceLive. Returns the dictation id. */
+  startVoiceLive: (language: string, sampleRate: number) => call<number>("start_voice_live", { language, sampleRate }),
+  /** Piece `seq` (0, 1, 2, …) of the microphone sound for a live dictation (16-bit mono PCM). */
+  voiceLiveAudio: async (id: number, seq: number, pcm: Uint8Array): Promise<void> => {
+    try {
+      await invoke("voice_live_audio", pcm, { headers: { "x-live-id": String(id), "x-live-seq": String(seq) } });
+    } catch (e) {
+      throw toAppError(e);
+    }
+  },
+  finishVoiceLive: (id: number) => call<void>("finish_voice_live", { id }),
+  cancelVoiceLive: (id: number) => call<void>("cancel_voice_live", { id }),
+  onVoiceLive: (fn: (e: VoiceLiveEvent) => void): Promise<UnlistenFn> => listen<VoiceLiveEvent>("voice-live", (ev) => fn(ev.payload)),
   /** Sends one microphone recording as raw bytes and returns what was said. */
   transcribeVoice: async (audio: Uint8Array, mime: string, language: string): Promise<Heard> => {
     try {
