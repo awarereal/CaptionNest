@@ -31,6 +31,10 @@ export interface CaptionFont {
   family: string;
   weights: number[];
   note: string;
+  /** A font the user added (see userFonts.ts). */
+  user?: boolean;
+  /** Whether it has Bengali letters (added fonts only; null when unknown). */
+  bangla?: boolean | null;
 }
 
 /** Scripts a caption font doesn't cover fall back to these, in order. */
@@ -46,12 +50,15 @@ export const CAPTION_FONTS: CaptionFont[] = [
 ];
 
 export const WEIGHT_NAMES: Record<number, string> = {
+  100: "Thin",
+  200: "Extra light",
   300: "Light",
   400: "Regular",
   500: "Medium",
   600: "Semibold",
   700: "Bold",
   800: "Heavy",
+  900: "Black",
 };
 
 export interface Preset {
@@ -87,8 +94,29 @@ export const PRESETS: Preset[] = [
 
 export const DEFAULT_STYLE: CaptionStyle = base;
 
+let userFonts: CaptionFont[] = [];
+
+/** Fonts the user added, as loaded by userFonts.ts. */
+export function setUserFonts(fonts: CaptionFont[]) {
+  userFonts = fonts;
+}
+
+/** Built-in caption fonts, then the ones the user added. */
+export function allFonts(): CaptionFont[] {
+  return [...CAPTION_FONTS, ...userFonts];
+}
+
+/** Ids of added fonts look like `user-0123456789ab` (from the family name). */
+export const isUserFontId = (id: string) => /^user-[0-9a-f]{12}$/.test(id);
+
+/** A style that names an added font which isn't on this computer (anymore). */
+export function fontMissing(id: string): boolean {
+  return isUserFontId(id) && !userFonts.some((f) => f.id === id);
+}
+
+/** The font to draw with; a missing added font falls back to the default. */
 export function fontById(id: string): CaptionFont {
-  return CAPTION_FONTS.find((f) => f.id === id) ?? CAPTION_FONTS[0];
+  return CAPTION_FONTS.find((f) => f.id === id) ?? userFonts.find((f) => f.id === id) ?? CAPTION_FONTS[0];
 }
 
 /** The closest weight the font actually has. */
@@ -114,7 +142,9 @@ export const MARGIN_RANGE = [2, 40] as const;
 export function normalizeStyle(raw: unknown): CaptionStyle {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_STYLE;
-  const font = typeof r.font === "string" && CAPTION_FONTS.some((f) => f.id === r.font) ? r.font : d.font;
+  // An added font's id is kept even before (or without) the font being loaded, so a
+  // project opened on another computer shows its font again once it's added there.
+  const font = typeof r.font === "string" && (CAPTION_FONTS.some((f) => f.id === r.font) || isUserFontId(r.font)) ? r.font : d.font;
   return {
     font,
     weight: nearestWeight(fontById(font), clamp(r.weight, 300, 900, d.weight)),

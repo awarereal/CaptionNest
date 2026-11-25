@@ -25,6 +25,8 @@ pub struct Paths {
     pub jobs: PathBuf,
     /// Generated preview copies of videos.
     pub previews: PathBuf,
+    /// Caption fonts the user added.
+    pub fonts: PathBuf,
 }
 
 impl Paths {
@@ -65,8 +67,9 @@ impl Paths {
             config,
             jobs: cache.join("jobs"),
             previews: cache.join("previews"),
+            fonts: data.join("fonts"),
         };
-        for dir in [&paths.models, &paths.config, &paths.jobs, &paths.previews] {
+        for dir in [&paths.models, &paths.config, &paths.jobs, &paths.previews, &paths.fonts] {
             std::fs::create_dir_all(dir).map_err(|e| AppError::internal(format!("create {}: {e}", dir.display())))?;
         }
         Ok(paths)

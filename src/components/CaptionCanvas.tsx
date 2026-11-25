@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ensureFonts, type CaptionStyle } from "../lib/captionStyle";
 import { drawCaption } from "../lib/renderCaption";
+import { useUserFonts } from "../lib/userFonts";
 
 /** Size of the video picture inside a box, as `object-fit: contain` places it. */
 export function fitRect(boxW: number, boxH: number, aspect: number): { w: number; h: number } {
@@ -28,6 +29,8 @@ export function CaptionCanvas({ text, style, aspect }: { text: string | null; st
   }, []);
 
   const fit = fitRect(box.w, box.h, aspect);
+  // Added fonts load after start-up; draw again when they arrive.
+  const fontsVersion = useUserFonts((s) => s.version);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -51,7 +54,7 @@ export function CaptionCanvas({ text, style, aspect }: { text: string | null; st
     return () => {
       alive = false;
     };
-  }, [text, style, fit.w, fit.h]);
+  }, [text, style, fit.w, fit.h, fontsVersion]);
 
   return (
     <div ref={layerRef} className="cap-layer" aria-hidden>

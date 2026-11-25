@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Waveform, Translate, TextAa, Cpu, HardDrives, Info, MagnifyingGlass, DownloadSimple, Trash, CheckCircle, Globe, WarningCircle } from "@phosphor-icons/react";
+import { Waveform, Translate, TextAa, Cpu, HardDrives, Info, MagnifyingGlass, DownloadSimple, Trash, CheckCircle, Globe, WarningCircle, Microphone } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
+import { useVoice } from "../state/voice";
 import { ModelCard, DownloadStatus } from "../components/ModelCard";
 import { Button, Modal, Switch, formatBytes } from "../components/ui";
 import { language } from "../lib/languages";
@@ -14,6 +15,7 @@ import { ONLINE_LANGUAGES, SARVAM_DASHBOARD, maskKey } from "../lib/online";
 const SECTIONS = [
   { id: "models", label: "Speech models", icon: Waveform },
   { id: "online", label: "Online recognition", icon: Globe },
+  { id: "voice", label: "Voice typing", icon: Microphone },
   { id: "languages", label: "Language packs", icon: Translate },
   { id: "captions", label: "Caption layout", icon: TextAa },
   { id: "processing", label: "Processing", icon: Cpu },
@@ -48,6 +50,7 @@ export function SettingsPanel() {
         <div className="settings__content">
           {active === "models" && <ModelsSection />}
           {active === "online" && <OnlineSection />}
+          {active === "voice" && <VoiceSection />}
           {active === "languages" && <LanguagesSection />}
           {active === "captions" && <CaptionsSection />}
           {active === "processing" && <ProcessingSection />}
@@ -357,6 +360,110 @@ function OnlineSection() {
       <p className="hint settings__footnote">
         Privacy: when online recognition is on, the speech in your video is sent to Sarvam AI in short pieces while captions are made. The picture
         isn't sent. The key is stored only on this computer.
+      </p>
+    </>
+  );
+}
+
+const DEEPGRAM_CONSOLE = "https://console.deepgram.com";
+
+function VoiceSection() {
+  const status = useVoice((s) => s.status);
+  const [draft, setDraft] = useState("");
+  const [state, setState] = useState<{ kind: "idle" | "checking" | "saved" | "error"; message?: string }>({ kind: "idle" });
+
+  const save = async () => {
+    const key = draft.trim();
+    if (!key) return;
+    setState({ kind: "checking" });
+    try {
+      useVoice.setState({ status: await api.saveVoiceKey(key) });
+      setDraft("");
+      setState({ kind: "saved" });
+    } catch (e) {
+      setState({ kind: "error", message: describeError(toAppError(e)).message });
+    }
+  };
+
+  const remove = async () => {
+    setState({ kind: "idle" });
+    try {
+      useVoice.setState({ status: await api.removeVoiceKey() });
+    } catch (e) {
+      setState({ kind: "error", message: describeError(toAppError(e)).message });
+    }
+  };
+
+  return (
+    <>
+      <SectionHead title="Voice typing">
+        Click the microphone beside a caption you're editing and speak: your words are written into the caption at the cursor. Deepgram's
+        Nova-3 model recognizes Bangla (English words you mix in are written in Bangla letters) and English.
+      </SectionHead>
+
+      {status?.keySaved && (
+        <div className="onlinekey">
+          <CheckCircle size={18} weight="fill" />
+          <span>
+            Key saved <span className="mono onlinekey__mask">{status.keyHint}</span>
+          </span>
+          <span className="spacer" />
+          <Button size="sm" variant="ghost" icon={<Trash size={15} />} onClick={() => void remove()}>
+            Remove key
+          </Button>
+        </div>
+      )}
+
+      <div className="formrow">
+        <label className="label" htmlFor="deepgram-key">
+          {status?.keySaved ? "Replace the key" : "Deepgram API key"}
+        </label>
+        <form
+          className="onlinekey__row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <input
+            id="deepgram-key"
+            className="field mono"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Paste the key"
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (state.kind !== "checking") setState({ kind: "idle" });
+            }}
+          />
+          <Button type="submit" variant="primary" busy={state.kind === "checking"} disabled={!draft.trim()}>
+            Check and save
+          </Button>
+        </form>
+        {state.kind === "saved" && (
+          <p className="formrow__note onlinekey__ok">
+            <CheckCircle size={14} weight="fill" /> Deepgram accepted the key. Voice typing is ready.
+          </p>
+        )}
+        {state.kind === "error" && (
+          <p className="formrow__note formrow__note--warn" role="alert">
+            <WarningCircle size={14} /> {state.message}
+          </p>
+        )}
+        <p className="hint">
+          Create a key at{" "}
+          <button className="btn btn--quiet linkish" onClick={() => void openUrl(DEEPGRAM_CONSOLE)}>
+            console.deepgram.com
+          </button>
+          . Checking a key sends one second of silence to Deepgram.
+        </p>
+      </div>
+
+      <p className="hint settings__footnote">
+        Privacy: only while you use voice typing, the recording of what you say is sent to Deepgram to be written down. Nothing else is sent. The
+        key is stored only on this computer and is never shown in full again.
       </p>
     </>
   );

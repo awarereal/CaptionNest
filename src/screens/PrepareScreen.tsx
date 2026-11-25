@@ -577,6 +577,9 @@ export function JobError({ error }: { error: AppError }) {
         st.openPanel("settings", "online");
         st.dismissJobError();
         break;
+      case "open-voice":
+        st.openPanel("settings", "voice");
+        break;
       case "show-details":
         setDetails((v) => !v);
         break;
@@ -592,6 +595,7 @@ export function JobError({ error }: { error: AppError }) {
     "open-models": "Open speech models",
     "open-languages": "Open language packs",
     "open-online": "Open online recognition",
+    "open-voice": "Open voice typing settings",
     preview: "Make a preview copy",
     "set-language": "Choose the spoken language",
     "free-space": "Manage downloads",

@@ -28,6 +28,14 @@ export async function pickOpen(options: Parameters<typeof open>[0]): Promise<str
   return typeof r === "string" ? r : null;
 }
 
+/** Like pickOpen, but the user may choose several files. */
+export async function pickOpenMany(options: Omit<NonNullable<Parameters<typeof open>[0]>, "multiple">): Promise<string[]> {
+  const queued = automationPath();
+  if (queued !== undefined) return queued ? [queued] : [];
+  const r = await open({ ...options, multiple: true });
+  return Array.isArray(r) ? r : typeof r === "string" ? [r] : [];
+}
+
 export async function pickSave(options: Parameters<typeof save>[0]): Promise<string | null> {
   const queued = automationPath();
   if (queued !== undefined) return queued;
