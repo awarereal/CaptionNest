@@ -17,6 +17,7 @@
 }
 
 .ws__captions {
+  container-type: inline-size;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -38,11 +39,18 @@
   overflow: auto;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 860px) {
   .ws {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(260px, 46%) minmax(0, 1fr);
+    grid-template-rows: minmax(200px, 40%) minmax(0, 1fr);
   }
+  .ws__video .lane {
+    display: none;
+  }
+}
+
+/* The caption lane under the video needs room; in a short window the list gets it. */
+@media (max-height: 680px) {
   .ws__video .lane {
     display: none;
   }
@@ -403,6 +411,45 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+}
+
+/* A narrow caption panel keeps every tool on one line: labels give way to icons
+   (each keeps its name for tooltips and screen readers). */
+@container (max-width: 560px) {
+  .typetoggle__label {
+    display: none;
+  }
+  .typetoggle {
+    padding: 0 4px;
+  }
+}
+
+@container (max-width: 470px) {
+  .caphead__tool .btn__label {
+    display: none;
+  }
+}
+
+/* In a narrow caption panel the row buttons (play, split, merge, delete) can't sit
+   on the time line without covering the times: they form a 2x2 block in a margin kept
+   free for them. */
+@container (max-width: 520px) {
+  .ws__captions .cue__main {
+    padding-right: 62px;
+  }
+  .ws__captions .cue__actions {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    top: 6px;
+    right: 6px;
+  }
+}
+
+@container (max-width: 440px) {
+  .ws__captions .cue__dur {
+    display: none;
+  }
 }
 
 .caphead__spacer {
@@ -796,11 +843,32 @@
   cursor: pointer;
 }
 
+/* Drawn by hand: WebKit's native radio renders as a faint dot with no ring on these
+   dark cards. */
 .radio-card input {
   grid-row: span 2;
-  accent-color: var(--gold);
+  -webkit-appearance: none;
+  appearance: none;
   width: 16px;
   height: 16px;
+  margin: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background: var(--slate);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.radio-card input:checked {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 3px var(--slate), inset 0 0 0 8px var(--gold);
+}
+
+.radio-card input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .radio-card.is-checked {
@@ -1763,6 +1831,8 @@
 /* ---------- Bangla typing ---------- */
 .typetoggle {
   display: inline-flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: 7px;
   height: 30px;

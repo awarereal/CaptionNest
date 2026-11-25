@@ -264,7 +264,16 @@ function CaptionsHeader({ onTranslate }: { onTranslate: () => void }) {
           Add caption
         </Button>
         <ShiftTiming disabled={!track || !!job} />
-        <Button size="sm" variant="ghost" icon={<Metronome size={15} />} onClick={() => useSync.getState().open()} disabled={!track || !!job}>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Metronome size={15} />}
+          onClick={() => useSync.getState().open()}
+          disabled={!track || !!job}
+          aria-label="Auto-sync"
+          title="Auto-sync"
+          className="caphead__tool"
+        >
           Auto-sync
         </Button>
         <span className="caphead__spacer" />
@@ -358,7 +367,7 @@ function ShiftTiming({ disabled }: { disabled: boolean }) {
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Popover.Trigger asChild>
-        <Button size="sm" variant="ghost" icon={<Clock size={15} />} disabled={disabled}>
+        <Button size="sm" variant="ghost" icon={<Clock size={15} />} disabled={disabled} aria-label="Shift timing" title="Shift timing" className="caphead__tool">
           Shift timing
         </Button>
       </Popover.Trigger>
@@ -520,8 +529,9 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
       if (st.view !== "workspace" || st.job) return;
-      const target = e.target as HTMLElement;
-      const typing = target.closest("input, textarea, [contenteditable]") !== null;
+      // Key events can come from the document itself (nothing focused), not only elements.
+      const target = e.target instanceof Element ? e.target : null;
+      const typing = target?.closest("input, textarea, [contenteditable]") != null;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (document.querySelector(".modal, .overlay")) return;

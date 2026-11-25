@@ -76,6 +76,7 @@ python3 scripts/dev/ui.py shot build/shots/home.png     # snapshot (macOS only)
 python3 scripts/dev/ui.py eval 'return document.title'  # JS in the real web view
 python3 scripts/dev/flow.py generate build/testmedia/<video>.mp4 --spoken bn --caption en --shots demo
 python3 scripts/dev/verify_suite.py                     # checks behind docs/VERIFICATION.md
+python3 scripts/dev/ui_audit.py <label>                 # every screen at 1360x860 and 900x600: layout checks + snapshots
 ```
 
 The zustand store is exposed as `window.__CN_STORE__` for these scripts.

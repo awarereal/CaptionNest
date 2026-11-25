@@ -74,6 +74,11 @@ fn handle(app: &AppHandle, pending: &Pending, mut stream: TcpStream) -> std::io:
             Ok(()) => (200, r#"{"ok":true}"#.to_string()),
             Err(e) => (500, serde_json::json!({ "ok": false, "value": e }).to_string()),
         },
+        // Body "1360x860": resize the window (logical pixels), to check layouts at any size.
+        ("POST", "/resize") => match resize(app, body.trim()) {
+            Ok(()) => (200, r#"{"ok":true}"#.to_string()),
+            Err(e) => (500, serde_json::json!({ "ok": false, "value": e }).to_string()),
+        },
         _ => (404, r#"{"ok":false,"value":"not found"}"#.to_string()),
     };
     write!(
@@ -81,6 +86,13 @@ fn handle(app: &AppHandle, pending: &Pending, mut stream: TcpStream) -> std::io:
         "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
         json.len()
     )
+}
+
+fn resize(app: &AppHandle, spec: &str) -> Result<(), String> {
+    let (w, h) = spec.split_once('x').ok_or("expected WIDTHxHEIGHT")?;
+    let (w, h): (f64, f64) = (w.parse().map_err(|_| "bad width")?, h.parse().map_err(|_| "bad height")?);
+    let wv = app.get_webview_window("main").ok_or("no main window")?;
+    wv.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())
 }
 
 fn eval(app: &AppHandle, pending: &Pending, js: &str) -> Result<(bool, String), String> {

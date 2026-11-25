@@ -141,11 +141,12 @@ function trackLabel(t: AudioTrack, i: number) {
   return parts.join(" · ");
 }
 
-function tierBadge(code: string) {
+function tierBadge(code: string, banglaReady = false) {
   const l = language(code);
   if (!l) return null;
-  const tone = l.tier === "good" ? "ok" : l.tier === "fair" ? "gold" : "danger";
-  return <Badge tone={tone}>{TIER_LABEL[l.tier]}</Badge>;
+  const tier = code === "bn" && banglaReady ? "good" : l.tier;
+  const tone = tier === "good" ? "ok" : tier === "fair" ? "gold" : "danger";
+  return <Badge tone={tone}>{TIER_LABEL[tier]}</Badge>;
 }
 
 function CaptionOptions() {
@@ -181,6 +182,9 @@ function CaptionOptions() {
     return map;
   }, [models]);
 
+  // Bangla is written well when a Bangla model is installed or Sarvam is on.
+  const banglaReady = !!banglaModel?.installed || onlineActive(settings, "bn");
+
   const spokenItems: PickerItem[] = useMemo(() => {
     const auto: PickerItem = { value: "auto", label: "Detect automatically", group: "Automatic", meta: "Works best with one main language" };
     const toItem = (group: string) => (l: (typeof SPOKEN_LANGUAGES)[number]): PickerItem => ({
@@ -189,14 +193,14 @@ function CaptionOptions() {
       native: l.native,
       group,
       keywords: l.code === "bn" ? ["bengali"] : [],
-      badge: tierBadge(l.code),
+      badge: tierBadge(l.code, banglaReady),
     });
     const featured = FEATURED.map((c) => language(c)!).map(toItem("Common"));
     const rest = SPOKEN_LANGUAGES.filter((l) => !FEATURED.includes(l.code))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(toItem("All languages"));
     return [auto, ...featured, ...rest];
-  }, []);
+  }, [banglaReady]);
 
   const captionItems: PickerItem[] = useMemo(() => {
     const items: PickerItem[] = [
@@ -289,7 +293,7 @@ function CaptionOptions() {
           Spoken language
         </label>
         <LanguagePicker id="spoken" label="Spoken language" value={spoken} items={spokenItems} onChange={(v) => void update({ spokenLanguage: v })} />
-        {spokenLang?.note && (
+        {spokenLang?.note && !(spoken === "bn" && banglaReady) && (
           <p className="formrow__note">
             <Info size={14} /> {spokenLang.note}
           </p>

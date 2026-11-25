@@ -43,11 +43,11 @@ export function BanglaTypingToggle() {
   const toggle = useBanglaTyping((s) => s.toggle);
   return (
     <Tip label={on ? "Bangla typing is on: type ami to get আমি" : "Bangla typing is off: letters stay English"} shortcut="Mod+B">
-      <button className={`typetoggle ${on ? "is-on" : ""}`} aria-pressed={on} onClick={toggle}>
+      <button className={`typetoggle ${on ? "is-on" : ""}`} aria-pressed={on} aria-label="Bangla typing" onClick={toggle}>
         <span className="typetoggle__glyph" lang="bn" aria-hidden>
           অ
         </span>
-        Bangla typing
+        <span className="typetoggle__label">Bangla typing</span>
       </button>
     </Tip>
   );

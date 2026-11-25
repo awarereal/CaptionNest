@@ -193,7 +193,7 @@ const CueRow = memo(function CueRow({
       data-cue-id={cue.id}
       onMouseDown={(e) => {
         select(cue.id);
-        if (!(e.target as HTMLElement).closest("input,button")) seekHere();
+        if (!(e.target instanceof Element && e.target.closest("input,button"))) seekHere();
       }}
       onFocus={() => select(cue.id)}
     >
