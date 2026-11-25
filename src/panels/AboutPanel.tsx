@@ -14,6 +14,9 @@ export function AboutPanel() {
           <LogoMark size={48} />
           <div>
             <p className="display about__name">CaptionNest {info?.version}</p>
+            <p className="madeby">
+              Made by <span className="madeby__name">Aware</span>
+            </p>
             <p className="hint">MIT License. Free to use and share. No account, no subscription, no data collection.</p>
           </div>
         </div>

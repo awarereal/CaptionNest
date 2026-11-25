@@ -14,6 +14,7 @@ mod pipeline;
 mod project;
 mod selftest;
 mod settings;
+mod theme;
 mod translate;
 mod voice;
 
@@ -147,6 +148,7 @@ async fn off_main<T: Send + 'static>(app: &AppHandle, work: impl FnOnce(&AppStat
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> {
+    let handle = app.clone();
     off_main(&app, move |state| {
         let mut current = state.settings.lock().unwrap();
         let mut settings = settings;
@@ -157,6 +159,9 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> 
         settings.recent_projects = current.recent_projects.clone();
         settings.sarvam_api_key = current.sarvam_api_key.clone();
         settings::save(&state.paths.config, &settings)?;
+        if settings.theme != current.theme {
+            theme::apply(&handle, &settings.theme);
+        }
         *current = settings;
         Ok(())
     })
@@ -746,6 +751,7 @@ pub fn run() {
             #[cfg(feature = "automation")]
             automation::start(app.handle());
             let settings = settings::load(&paths.config);
+            theme::apply(app.handle(), &settings.theme);
             let voice = voice::VoiceKey::load(&paths.config);
             app.manage(AppState {
                 paths,

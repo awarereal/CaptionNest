@@ -116,6 +116,9 @@ export function HomeScreen() {
             No speech model yet — <strong>set up now</strong>
           </button>
         )}
+        <p className="madeby">
+          Made by <span className="madeby__name">Aware</span>
+        </p>
       </footer>
     </div>
   );
