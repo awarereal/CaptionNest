@@ -391,6 +391,7 @@ const STAGE_TEXT: Record<Stage, string> = {
   translating: "Translating",
   finishing: "Building captions",
   converting: "Converting",
+  rendering: "Making the video",
 };
 
 function Elapsed({ since }: { since: number }) {

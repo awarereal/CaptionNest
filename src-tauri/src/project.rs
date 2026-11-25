@@ -29,6 +29,10 @@ pub struct Project {
     pub settings: GenerationSettings,
     pub tracks: Vec<Track>,
     pub active_track_id: Option<String>,
+    /// Caption look chosen in the app (font, colors, position). Stored as the app
+    /// wrote it; the frontend validates it when loading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -245,6 +249,7 @@ mod tests {
                 cues: vec![Cue { check: Vec::new(), id: "c1".into(), start_ms: 0, end_ms: 900, text: "আমি বাংলায় কথা বলি।\nদ্বিতীয় লাইন".into() }],
             }],
             active_track_id: Some("t1".into()),
+            style: Some(serde_json::json!({"font": "anek", "size": 6.0})),
         }
     }
 

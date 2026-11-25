@@ -34,6 +34,9 @@ pub struct VideoStream {
     pub frame_rate: Option<f64>,
     /// Average and nominal frame rates differ noticeably (variable frame rate).
     pub variable_frame_rate: bool,
+    /// Clockwise rotation players apply (0, 90, 180, 270), from the display matrix.
+    pub rotation: u32,
+    pub bit_rate: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +72,9 @@ struct RawStream {
     r_frame_rate: Option<String>,
     avg_frame_rate: Option<String>,
     duration: Option<String>,
+    bit_rate: Option<String>,
+    #[serde(default)]
+    side_data_list: Vec<HashMap<String, serde_json::Value>>,
     #[serde(default)]
     tags: HashMap<String, String>,
     #[serde(default)]
@@ -102,6 +108,18 @@ pub async fn probe(ffprobe: &Path, path: &Path) -> AppResult<MediaInfo> {
     parse(&out.stdout, path, meta.len())
 }
 
+/// Clockwise display rotation. ffprobe reports the display matrix angle
+/// counter-clockwise (e.g. -90 for a phone video shot upright); old files use a tag.
+fn rotation(s: &RawStream) -> u32 {
+    let matrix = s.side_data_list.iter().find_map(|d| d.get("rotation").and_then(|v| v.as_f64()));
+    let deg = match matrix {
+        Some(r) => -r,
+        None => s.tags.get("rotate").and_then(|r| r.parse::<f64>().ok()).unwrap_or(0.0),
+    };
+    let q = ((deg / 90.0).round() as i64).rem_euclid(4);
+    (q * 90) as u32
+}
+
 pub(crate) fn parse(json: &[u8], path: &Path, size_bytes: u64) -> AppResult<MediaInfo> {
     let raw: Raw = serde_json::from_slice(json).map_err(|e| {
         AppError::new(ErrorCode::CorruptMedia, "CaptionNest couldn't read this file.").with_detail(e.to_string())
@@ -126,6 +144,8 @@ pub(crate) fn parse(json: &[u8], path: &Path, size_bytes: u64) -> AppResult<Medi
                     height: s.height.unwrap_or(0),
                     frame_rate: average.or(nominal),
                     variable_frame_rate: vfr,
+                    rotation: rotation(s),
+                    bit_rate: s.bit_rate.as_deref().and_then(|b| b.parse().ok()),
                 });
             }
             Some("audio") => audio_tracks.push(AudioTrack {
@@ -272,6 +292,7 @@ mod tests {
     #[test]
     fn no_audio_is_reported() {
         let json = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264"}],"format":{"format_name":"mov,mp4","duration":"3.0"}}"#;
+        assert_eq!(parse(json.as_bytes(), Path::new("/x.mp4"), 1).unwrap().video.unwrap().rotation, 0);
         let info = parse(json.as_bytes(), Path::new("silent.mp4"), 1).unwrap();
         assert_eq!(info.default_audio, None);
         assert_eq!(require_audio(&info).unwrap_err().code, ErrorCode::NoAudio);
@@ -290,5 +311,15 @@ mod tests {
     #[test]
     fn garbage_is_corrupt_media() {
         assert_eq!(parse(b"nope", Path::new("x"), 1).unwrap_err().code, ErrorCode::CorruptMedia);
+    }
+
+    #[test]
+    fn reads_phone_rotation_and_bitrate() {
+        let json = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"hevc","width":1920,"height":1080,"bit_rate":"8000000",
+            "side_data_list":[{"side_data_type":"Display Matrix","rotation":-90}]}],"format":{"format_name":"mov,mp4","duration":"3.0"}}"#;
+        let v = parse(json.as_bytes(), Path::new("/x.mov"), 1).unwrap().video.unwrap();
+        assert_eq!((v.rotation, v.bit_rate), (90, Some(8_000_000)));
+        let old = r#"{"streams":[{"index":0,"codec_type":"video","codec_name":"h264","tags":{"rotate":"180"}}],"format":{"duration":"1"}}"#;
+        assert_eq!(parse(old.as_bytes(), Path::new("/x.mp4"), 1).unwrap().video.unwrap().rotation, 180);
     }
 }

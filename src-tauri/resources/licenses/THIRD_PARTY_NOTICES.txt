@@ -64,6 +64,16 @@ Atkinson Hyperlegible Next and Atkinson Hyperlegible Mono — SIL Open Font
   License 1.1 — Copyright 2020-2024 Braille Institute of America, Inc.
 Readex Pro — SIL Open Font License 1.1 — Copyright 2021 The Readex Pro
   Project Authors
+Caption fonts (offered in Caption style and drawn into exported videos), all
+SIL Open Font License 1.1:
+  Hind Siliguri — Copyright (c) 2015 Indian Type Foundry
+  Noto Sans — Copyright 2022 The Noto Project Authors
+  Noto Sans Bengali — Copyright 2025 The Noto Project Authors
+  Baloo Da 2 — Copyright 2019 The Baloo 2 Project Authors (Ek Type)
+  Atma — Copyright 2015 The Atma Project Authors (Black Foundry)
+  Tiro Bangla — Copyright 2020 The Indigo Project Authors (Tiro Typeworks)
+  The OFL allows these fonts to be used in videos you make, including
+  commercially.
 Fonts are bundled through the Fontsource packages (MIT).
 
 

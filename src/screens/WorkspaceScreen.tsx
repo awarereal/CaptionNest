@@ -29,6 +29,7 @@ import { confirmDiscard, pickOpen, saveProject } from "../lib/fileFlows";
 import { useExport } from "../panels/ExportDialog";
 import { ExportDialog } from "../panels/ExportDialog";
 import { TranslateDialog } from "../panels/TranslateDialog";
+import { StylePanel } from "../panels/StylePanel";
 import { JobError, JobProgress } from "./PrepareScreen";
 import { VIDEO_EXTENSIONS } from "../lib/fileFlows";
 import { ask } from "../components/Confirm";
@@ -40,6 +41,7 @@ export function WorkspaceScreen() {
   const jobError = useStore((s) => s.jobError);
   const videoMissing = useStore((s) => s.videoMissing);
   const warnings = useStore((s) => s.warnings);
+  const styleOpen = useStore((s) => s.styleOpen);
   const [translateOpen, setTranslateOpen] = useState(false);
   useShortcuts();
 
@@ -55,25 +57,31 @@ export function WorkspaceScreen() {
             Graphics acceleration wasn't available, so this run used the processor. Results are the same; it just took longer.
           </Banner>
         )}
-        <Player cues={track?.cues ?? []} language={track?.language} showLane durationMs={project.video.durationMs} />
+        <Player cues={track?.cues ?? []} showLane durationMs={project.video.durationMs} />
       </section>
-      <section className="ws__captions" aria-label="Caption editor">
-        <CaptionsHeader onTranslate={() => setTranslateOpen(true)} />
-        <div className="ws__list">
-          {job ? (
-            <div className="ws__job">
-              <JobProgress compact />
-            </div>
-          ) : jobError ? (
-            <div className="ws__job">
-              <JobError error={jobError} />
-            </div>
-          ) : track ? (
-            <CueList cues={track.cues} language={track.language} />
-          ) : null}
-        </div>
-        <StatusBar />
-      </section>
+      {styleOpen ? (
+        <section className="ws__captions ws__captions--style">
+          <StylePanel />
+        </section>
+      ) : (
+        <section className="ws__captions" aria-label="Caption editor">
+          <CaptionsHeader onTranslate={() => setTranslateOpen(true)} />
+          <div className="ws__list">
+            {job ? (
+              <div className="ws__job">
+                <JobProgress compact />
+              </div>
+            ) : jobError ? (
+              <div className="ws__job">
+                <JobError error={jobError} />
+              </div>
+            ) : track ? (
+              <CueList cues={track.cues} language={track.language} />
+            ) : null}
+          </div>
+          <StatusBar />
+        </section>
+      )}
       <ExportDialog />
       <TranslateDialog open={translateOpen} onOpenChange={setTranslateOpen} />
     </div>

@@ -18,6 +18,8 @@ use crate::error::AppError;
 pub enum JobKind {
     Generate,
     Preview,
+    /// Exporting a video with captions drawn in.
+    Burn,
 }
 
 #[derive(Default)]

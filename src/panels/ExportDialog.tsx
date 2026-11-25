@@ -2,28 +2,40 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { pickSave } from "../lib/fileFlows";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { CheckCircle, WarningCircle, Warning, FileText, FolderOpen, Question, MagicWand } from "@phosphor-icons/react";
+import { CheckCircle, WarningCircle, Warning, FileText, FolderOpen, Question, MagicWand, FilmStrip } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
 import { api, toAppError } from "../lib/api";
 import { languageName } from "../lib/languages";
 import { describeError } from "../lib/errors";
 import type { ValidationIssue, ValidationReport } from "../lib/types";
-import { Button, Modal } from "../components/ui";
+import { Button, Modal, ProgressBar } from "../components/ui";
+import { useBurn } from "../state/burn";
+import { VideoExport, videoFrameSize } from "./VideoExport";
+
+export type ExportMode = "srt" | "video";
 
 interface ExportState {
   open: boolean;
-  start: () => void;
+  mode: ExportMode;
+  start: (mode?: ExportMode) => void;
   close: () => void;
 }
 
 export const useExport = create<ExportState>((set) => ({
   open: false,
-  start: () => {
+  mode: "srt",
+  start: (mode = "srt") => {
     const st = useStore.getState();
-    if (st.view === "workspace" && st.project && !st.job) set({ open: true });
+    if (st.view === "workspace" && st.project && !st.job) set({ open: true, mode: mode === "video" ? "video" : "srt" });
   },
-  close: () => set({ open: false }),
+  close: () => {
+    // A video export keeps running only while its dialog is open.
+    const b = useBurn.getState();
+    if (b.phase === "drawing" || b.phase === "rendering") return;
+    b.reset();
+    set({ open: false });
+  },
 }));
 
 const ISSUE_TEXT: Record<ValidationIssue["kind"], (n: number) => string> = {
@@ -36,7 +48,12 @@ const ISSUE_TEXT: Record<ValidationIssue["kind"], (n: number) => string> = {
 
 export function ExportDialog() {
   const open = useExport((s) => s.open);
+  const mode = useExport((s) => s.mode);
   const close = useExport((s) => s.close);
+  const media = useStore((s) => s.media);
+  const videoMissing = useStore((s) => s.videoMissing);
+  const style = useStore((s) => s.style);
+  const burn = useBurn();
   const tracks = useStore((s) => s.history.present);
   const activeId = useStore((s) => s.activeTrackId);
   const project = useStore((s) => s.project);
@@ -77,7 +94,11 @@ export function ExportDialog() {
     }, {}),
   ) as [ValidationIssue["kind"], ValidationIssue[]][];
 
-  const fileName = `${project.video.fileName.replace(/\.[^.]+$/, "")} - ${languageName(track?.language, "Captions")}.srt`;
+  const baseName = project.video.fileName.replace(/\.[^.]+$/, "");
+  const fileName = `${baseName} - ${languageName(track?.language, "Captions")}.srt`;
+  const videoName = `${baseName} - ${languageName(track?.language, "Captions")} captions.mp4`;
+  const frame = videoFrameSize(media);
+  const running = burn.phase === "drawing" || burn.phase === "rendering";
 
   const show = (issue: ValidationIssue) => {
     const st = useStore.getState();
@@ -121,6 +142,152 @@ export function ExportDialog() {
       setBusy(false);
     }
   };
+
+  const doVideo = async () => {
+    if (!track || !frame || !media) return;
+    const picked = await pickSave({
+      title: "Export video with captions",
+      defaultPath: videoName,
+      filters: [{ name: "MP4 video", extensions: ["mp4"] }],
+    });
+    if (!picked) return;
+    const outputPath = picked.toLowerCase().endsWith(".mp4") ? picked : `${picked}.mp4`;
+    if (outputPath === media.path) {
+      setError("Choose a different name: the original video can't be replaced.");
+      return;
+    }
+    setError(null);
+    await burn.run({
+      videoPath: media.path,
+      audioStreamIndex: project.video.audioStreamIndex,
+      outputPath,
+      cues: track.cues,
+      style,
+      width: frame.width,
+      height: frame.height,
+    });
+  };
+
+  if (mode === "video" && burn.phase === "done" && burn.result) {
+    return (
+      <Modal
+        open={open}
+        onOpenChange={(o) => !o && close()}
+        title="Video exported"
+        size="md"
+        footer={
+          <>
+            <span className="spacer" />
+            <Button variant="secondary" icon={<FolderOpen size={16} />} onClick={() => void revealItemInDir(burn.result!.path)}>
+              Show in folder
+            </Button>
+            <Button variant="primary" onClick={close}>
+              Done
+            </Button>
+          </>
+        }
+      >
+        <div className="export-done">
+          <CheckCircle size={40} weight="fill" />
+          <p className="export-done__name selectable">{burn.result.path.split(/[\\/]/).pop()}</p>
+          <p className="hint">
+            {burn.captions} captions drawn into the picture, with the original sound. Your original video isn't changed.
+          </p>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (mode === "video") {
+    const blockedReason = !media?.video
+      ? "This file has no picture, so there's nothing to draw captions on. Export an SRT instead."
+      : videoMissing
+        ? "The video isn't where it was. Locate it first, then export."
+        : null;
+    return (
+      <Modal
+        open={open}
+        onOpenChange={(o) => !o && close()}
+        title="Export video with captions"
+        description="Makes a new MP4 with your captions drawn into the picture, in the style you chose. Your original video isn't changed."
+        size="md"
+        footer={
+          running ? (
+            <>
+              <span className="spacer" />
+              <Button variant="secondary" onClick={() => void burn.cancel()}>
+                Stop
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+              <span className="spacer" />
+              <Button
+                variant="primary"
+                icon={<FilmStrip size={16} weight="bold" />}
+                disabled={!report || blocking.length > 0 || !track || track.cues.length === 0 || !!blockedReason}
+                onClick={() => void doVideo()}
+              >
+                {burn.phase === "failed" ? "Try again" : "Export video…"}
+              </Button>
+            </>
+          )
+        }
+      >
+        {running ? (
+          <div className="burnprog" aria-live="polite">
+            <p className="burnprog__stage">{burn.phase === "drawing" ? "Drawing captions" : "Making the video"}</p>
+            <ProgressBar value={burn.progress} label="Video export progress" />
+            <p className="hint">
+              {burn.phase === "drawing"
+                ? `${Math.round(burn.progress * burn.captions)} of ${burn.captions} captions`
+                : `${Math.round(burn.progress * 100)}% · keep CaptionNest open until it's done`}
+            </p>
+          </div>
+        ) : (
+          <>
+            {tracks.length > 1 && (
+              <fieldset className="tracks-pick">
+                <legend className="label">Captions to draw</legend>
+                {tracks.map((t) => (
+                  <label key={t.id} className={`radio-card ${t.id === trackId ? "is-checked" : ""}`}>
+                    <input type="radio" name="export-track" checked={t.id === trackId} onChange={() => setTrackId(t.id)} />
+                    <span className="radio-card__title">{languageName(t.language)}</span>
+                    <span className="radio-card__meta">
+                      {t.kind === "original" ? "Original transcript" : "Translation"} · {t.cues.length} captions
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {blockedReason ? (
+              <p className="dl__error" role="alert">
+                {blockedReason}
+              </p>
+            ) : (
+              <>
+                {blocking.length > 0 && <p className="hint">Fix the captions marked in red in the SRT export check, then export.</p>}
+                <VideoExport track={track} style={style} frame={frame} />
+              </>
+            )}
+            {burn.phase === "failed" && burn.error && (
+              <p className="dl__error" role="alert">
+                {describeError(burn.error).message}
+              </p>
+            )}
+          </>
+        )}
+        {error && (
+          <p className="dl__error" role="alert">
+            {error}
+          </p>
+        )}
+      </Modal>
+    );
+  }
 
   if (done) {
     return (

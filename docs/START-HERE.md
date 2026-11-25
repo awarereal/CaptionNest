@@ -96,6 +96,9 @@ mistakes as the general models.
   is left to check; click **next** to jump to it.
 - If some speech couldn't be recognized, CaptionNest keeps it as an **empty caption**
   so nothing is missed: listen and type the words, or delete it.
+- **Style** (under the video) sets how captions look: six ready-made looks, or choose
+  the font, weight, size, color, outline, background, shadow and position yourself.
+  The preview shows exactly what an exported video will look like.
 - **Save** keeps your work as a `.captionnest` project. If you move the video later,
   CaptionNest asks you to locate it.
 - **Add language** creates a translated caption track; your original captions stay as
@@ -107,7 +110,17 @@ draft: go through the **Check** words before you export.
 
 ---
 
-## 6. Import into CapCut
+## 6. Export
+
+There are two ways to finish:
+
+- **Export SRT for CapCut**: a subtitle file with the words and timing. In CapCut each
+  caption stays editable, and you style them there (below).
+- **Export video**: a new MP4 with your captions drawn into the picture, in the style
+  you chose in CaptionNest, with the original sound. Nothing else is needed, but the
+  captions can no longer be edited in CapCut. Your original video isn't changed.
+
+## 7. Import the SRT into CapCut
 
 Click **Export SRT for CapCut**. CaptionNest checks the captions (empty text, timing,
 overlaps) and saves a UTF-8 `.srt` file.
@@ -127,7 +140,7 @@ overlaps) and saves a UTF-8 `.srt` file.
 import `.srt` files. Import on CapCut Desktop or Web instead.
 
 The SRT file holds the words and their timing. Fonts, colors, animations and video edits
-are done in CapCut.
+are done in CapCut. (To keep CaptionNest's style instead, use **Export video**.)
 
 ---
 

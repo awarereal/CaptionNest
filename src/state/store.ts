@@ -5,6 +5,8 @@ import { api, mediaUrl, toAppError } from "../lib/api";
 import * as ops from "../lib/cueOps";
 import { createHistory, record, redo as redoH, undo as undoH, type History } from "../lib/history";
 import { DEFAULT_MODEL_ID, MODEL_INFO } from "../lib/models";
+import { lastStyle, normalizeStyle, rememberStyle, type CaptionStyle } from "../lib/captionStyle";
+import { useBurn } from "./burn";
 import type {
   AppError,
   AppInfo,
@@ -66,6 +68,9 @@ interface Store {
   history: History<Track[]>;
   activeTrackId: string | null;
   selectedCueId: string | null;
+  /** How captions look in the preview and in exported videos. */
+  style: CaptionStyle;
+  styleOpen: boolean;
 
   job: JobView | null;
   jobError: AppError | null;
@@ -97,6 +102,8 @@ interface Store {
   saveProject: (path: string) => Promise<void>;
   relinkVideo: (path: string) => Promise<{ ok: boolean; durationMismatch?: boolean }>;
   closeProject: () => void;
+  setStyle: (patch: Partial<CaptionStyle>) => void;
+  setStyleOpen: (open: boolean) => void;
   backToOptions: () => void;
 
   setActiveTrack: (id: string) => void;
@@ -143,6 +150,8 @@ export const useStore = create<Store>((set, get) => {
     dirty: false,
     videoMissing: false,
     history: createHistory<Track[]>([]),
+    style: lastStyle(),
+    styleOpen: false,
     activeTrackId: null,
     selectedCueId: null,
     job: null,
@@ -330,6 +339,10 @@ export const useStore = create<Store>((set, get) => {
     dismissJobError: () => set({ jobError: null }),
 
     onJobProgress(e) {
+      if (e.kind === "burn") {
+        useBurn.getState().onProgress(e);
+        return;
+      }
       if (e.kind === "preview") {
         const p = get().preview;
         if (p.status === "converting" && (!p.jobId || p.jobId === e.jobId)) {
@@ -345,6 +358,10 @@ export const useStore = create<Store>((set, get) => {
     },
 
     onJobFinished(e) {
+      if (e.kind === "burn") {
+        useBurn.getState().onFinished(e);
+        return;
+      }
       if (e.kind === "preview") {
         const p = get().preview;
         if (p.jobId && p.jobId !== e.jobId) return;
@@ -411,6 +428,8 @@ export const useStore = create<Store>((set, get) => {
       set({
         project,
         projectPath: null,
+        style: lastStyle(),
+        styleOpen: false,
         history: createHistory(result.tracks),
         activeTrackId: result.activeTrackId,
         selectedCueId: null,
@@ -441,6 +460,8 @@ export const useStore = create<Store>((set, get) => {
         audioStream: p.video.audioStreamIndex,
         preview: { status: "original", url: media ? mediaUrl(media.path) : null },
         history: createHistory(p.tracks),
+        style: p.style ? normalizeStyle(p.style) : lastStyle(),
+        styleOpen: false,
         activeTrackId: p.activeTrackId ?? p.tracks[0]?.id ?? null,
         selectedCueId: null,
         dirty: false,
@@ -455,9 +476,9 @@ export const useStore = create<Store>((set, get) => {
     },
 
     async saveProject(path) {
-      const { project, history, activeTrackId } = get();
+      const { project, history, activeTrackId, style } = get();
       if (!project) return;
-      const next: Project = { ...project, tracks: history.present, activeTrackId, updatedAtMs: Date.now() };
+      const next: Project = { ...project, tracks: history.present, activeTrackId, style, updatedAtMs: Date.now() };
       await api.saveProject(path, next);
       set({ project: next, projectPath: path, dirty: false });
       const s = get().settings;
@@ -481,6 +502,14 @@ export const useStore = create<Store>((set, get) => {
       });
       return { ok: true, durationMismatch: mismatch };
     },
+
+    setStyle(patch) {
+      const style = normalizeStyle({ ...get().style, ...patch });
+      rememberStyle(style);
+      set({ style, dirty: get().project ? true : get().dirty });
+    },
+
+    setStyleOpen: (open) => set({ styleOpen: open }),
 
     closeProject() {
       set({

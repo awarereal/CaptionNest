@@ -1,4 +1,4 @@
-import { ArrowLeft, FloppyDisk, GearSix, Question, Export } from "@phosphor-icons/react";
+import { ArrowLeft, FloppyDisk, GearSix, Question, Export, FilmStrip } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { Wordmark } from "./Logo";
 import { Button, IconButton } from "./ui";
@@ -60,7 +60,10 @@ export function TopBar() {
             <Button variant="ghost" size="sm" icon={<FloppyDisk size={17} />} onClick={() => void saveProject()} title="Save project">
               Save
             </Button>
-            <Button variant="primary" size="sm" icon={<Export size={17} weight="bold" />} onClick={startExport} disabled={!!job}>
+            <Button variant="secondary" size="sm" icon={<FilmStrip size={17} />} onClick={() => startExport("video")} disabled={!!job}>
+              Export video
+            </Button>
+            <Button variant="primary" size="sm" icon={<Export size={17} weight="bold" />} onClick={() => startExport("srt")} disabled={!!job}>
               Export SRT for CapCut
             </Button>
             <span className="topbar__sep" />

@@ -57,6 +57,15 @@ export interface TranslateRequest {
   maxLineChars: number;
 }
 
+export interface BurnRequest {
+  videoPath: string;
+  audioStreamIndex: number | null;
+  outputPath: string;
+  framesId: string;
+  blank: string;
+  cues: { startMs: number; endMs: number; file: string }[];
+}
+
 export const api = {
   appInfo: () => call<AppInfo>("app_info"),
   showWindow: () => call<void>("show_main_window"),
@@ -82,6 +91,17 @@ export const api = {
   exportSrt: (path: string, cues: Cue[]) =>
     call<{ path: string; cueCount: number; bytes: number }>("export_srt", { path, cues }),
   importSrt: (path: string) => call<Cue[]>("import_srt", { path }),
+
+  burnBegin: () => call<string>("burn_begin"),
+  /** Sends one caption image as raw bytes (no JSON encoding of large arrays). */
+  burnFrame: async (framesId: string, file: string, png: Uint8Array) => {
+    try {
+      await invoke("burn_frame", png, { headers: { "x-burn-id": framesId, "x-file": file } });
+    } catch (e) {
+      throw toAppError(e);
+    }
+  },
+  startBurn: (request: BurnRequest) => call<string>("start_burn", { request }),
 
   saveProject: (path: string, project: Project) => call<void>("save_project", { path, project }),
   loadProject: (path: string) => call<LoadedProject>("load_project", { path }),

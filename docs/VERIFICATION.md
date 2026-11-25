@@ -53,6 +53,21 @@ Other measured changes: punctuated language prompts restore punctuation and capi
 lost in timestamped decoding; a chunk-sized encoder window (`-ac`) was 22% faster with
 CER 27.5% vs 28.8%; two parallel recognizer processes were ~19% faster.
 
+## Caption timing
+
+Measured against the audio itself (`scripts/bench/timing_check.py`): each caption edge
+next to a pause compared with where the voice really starts and stops.
+
+| | Caption start vs voice | Caption end vs voice (incl. 0.15 s linger) |
+|---|---|---|
+| Before (Whisper word times) | 0.35–0.62 s off on Bangla | 0.52–0.74 s late |
+| **Now** (DTW word alignment + VAD edges) | **0–0.1 s** | **0.05–0.3 s** |
+
+Word times now come from whisper.cpp's DTW token alignment (`-dtw`, costs about 9% more
+time on Apple-chip GPUs and 21% on CPU), and caption edges at pauses are placed on the
+speech onsets/offsets found by the Silero VAD. In CapCut the SRT lands within one video
+frame (CapCut snaps to frames).
+
 ## Long video
 
 30.2-minute video of 126 real Bangla utterances with 0.5–3 s pauses, run through the real
@@ -104,6 +119,8 @@ the UI. 18 of 18 pass:
 | 30-minute video | pass (above) |
 | No internet (all traffic routed to a dead proxy) | pass — English and Bangla→English captions made; a download fails within seconds: "Couldn't reach the download server…" |
 | Network watch while generating and translating | pass — 0 connections leave the computer |
+| Caption style: presets, font, colors, position; live preview | pass — screenshots in `build/shots/style-*.png` |
+| Export video with burned-in captions (Bangla, Highlight style) | pass — H.264 + original AAC, same 41.16 s length; Bengali conjuncts drawn correctly; no caption 0.12 s before a caption starts |
 
 ## CapCut import
 

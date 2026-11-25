@@ -11,13 +11,14 @@ import {
   VideoCameraSlash,
   MusicNotes,
   Check,
+  TextAa,
 } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { usePlayhead } from "../state/playhead";
 import { activeIndex, sortCues } from "../lib/cueOps";
 import { formatClock } from "../lib/time";
-import { isRtl } from "../lib/languages";
 import type { Cue } from "../lib/types";
+import { CaptionCanvas } from "./CaptionCanvas";
 import { Button, IconButton, ProgressBar } from "./ui";
 import { CaptionLane } from "./CaptionLane";
 
@@ -25,12 +26,10 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 export function Player({
   cues = [],
-  language,
   showLane = false,
   durationMs,
 }: {
   cues?: Cue[];
-  language?: string | null;
   showLane?: boolean;
   durationMs: number;
 }) {
@@ -49,7 +48,11 @@ export function Player({
   const sorted = useMemo(() => sortCues(cues), [cues]);
   const idx = activeIndex(sorted, ms);
   const active = idx >= 0 ? sorted[idx] : null;
-  const rtl = isRtl(language);
+  const style = useStore((s) => s.style);
+  const styleOpen = useStore((s) => s.styleOpen);
+  const project = useStore((s) => s.project);
+  const v = media?.video;
+  const aspect = v && v.width > 0 && v.height > 0 ? (v.rotation % 180 === 90 ? v.height / v.width : v.width / v.height) : 16 / 9;
   const hasVideo = (media?.video ?? null) !== null && preview.status !== "audio-only";
 
   useEffect(() => setFailed(false), [preview.url]);
@@ -130,13 +133,7 @@ export function Player({
           </div>
         )}
 
-        {active && (
-          <div className="overlay-cue" aria-live="off">
-            <span className="overlay-cue__text caption-text" dir={rtl ? "rtl" : "auto"} lang={language ?? undefined}>
-              {active.text}
-            </span>
-          </div>
-        )}
+        {!unplayable && !videoMissing && !converting && <CaptionCanvas text={active?.text ?? null} style={style} aspect={aspect} />}
 
         {(unplayable || videoMissing) && (
           <div className="player__notice">
@@ -214,6 +211,15 @@ export function Player({
         <IconButton label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((m) => !m)} size="sm" side="top">
           {muted ? <SpeakerSlash size={17} /> : <SpeakerHigh size={17} />}
         </IconButton>
+        {project && (
+          <button
+            className={`transport__style ${styleOpen ? "is-on" : ""}`}
+            aria-pressed={styleOpen}
+            onClick={() => useStore.getState().setStyleOpen(!styleOpen)}
+          >
+            <TextAa size={16} weight="bold" /> Style
+          </button>
+        )}
       </div>
 
       {showLane && <CaptionLane cues={sorted} durationMs={durationMs} activeId={active?.id ?? null} onSeek={seek} />}

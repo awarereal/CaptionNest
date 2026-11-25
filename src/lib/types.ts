@@ -46,6 +46,8 @@ export interface Project {
   settings: GenerationSettings;
   tracks: Track[];
   activeTrackId: string | null;
+  /** Caption look for the preview and burned-in exports (see captionStyle.ts). */
+  style?: unknown;
 }
 
 export type VideoStatus =
@@ -75,6 +77,9 @@ export interface VideoStream {
   height: number;
   frameRate?: number | null;
   variableFrameRate: boolean;
+  /** Clockwise rotation applied on playback: 0, 90, 180 or 270. */
+  rotation: number;
+  bitRate?: number | null;
 }
 
 export interface MediaInfo {
@@ -161,8 +166,8 @@ export interface DownloadEvent {
   error?: AppError;
 }
 
-export type JobKind = "generate" | "preview";
-export type Stage = "preparing" | "extracting" | "transcribing" | "translating" | "finishing" | "converting";
+export type JobKind = "generate" | "preview" | "burn";
+export type Stage = "preparing" | "extracting" | "transcribing" | "translating" | "finishing" | "converting" | "rendering";
 
 export interface ProgressEvent {
   jobId: string;

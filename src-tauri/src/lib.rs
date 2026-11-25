@@ -135,6 +135,62 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
     Ok(job_id)
 }
 
+// ---------- video with burned-in captions ----------
+
+/// A folder for the caption images of one video export. Returns its token.
+#[tauri::command]
+fn burn_begin(state: State<'_, AppState>) -> Cmd<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    std::fs::create_dir_all(state.paths.jobs.join(format!("burn-{id}")))?;
+    Ok(id)
+}
+
+/// Saves one caption image (PNG bytes as the raw request body).
+#[tauri::command]
+fn burn_frame(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Cmd<()> {
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+    let (Some(id), Some(file)) = (header("x-burn-id"), header("x-file")) else {
+        return Err(AppError::internal("caption image without a name"));
+    };
+    if uuid::Uuid::parse_str(&id).is_err() || !media::burn::valid_frame_name(&file) {
+        return Err(AppError::internal("invalid caption image name"));
+    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::internal("caption image must be sent as bytes"));
+    };
+    let dir = state.paths.jobs.join(format!("burn-{id}"));
+    if !dir.is_dir() {
+        return Err(AppError::internal("caption image folder is gone"));
+    }
+    std::fs::write(dir.join(file), bytes)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::burn::BurnRequest) -> Cmd<String> {
+    if uuid::Uuid::parse_str(&request.frames_id).is_err() || !media::burn::valid_frame_name(&request.blank) {
+        return Err(AppError::internal("invalid caption image folder"));
+    }
+    let (job_id, cancel) = state.jobs.begin(JobKind::Burn);
+    let id = job_id.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = handle.state::<AppState>();
+        let report = Reporter::new(handle.clone(), id.clone(), JobKind::Burn);
+        // The images are removed when the export ends, however it ends.
+        let frames = jobs::ScratchDir::create(&state.paths.jobs, &format!("burn-{}", request.frames_id));
+        let result = async {
+            let frames = frames?;
+            report.stage("rendering", Some(0.0), None);
+            let info = pipeline::probe(&state.paths, Path::new(&request.video_path)).await?;
+            media::burn::burn(&state.paths.tool("ffmpeg")?, &info, &request, frames.path(), &cancel, |p| report.stage("rendering", Some(p), None)).await
+        }
+        .await;
+        jobs::finish(&handle, &state.jobs, JobKind::Burn, &id, result);
+    });
+    Ok(job_id)
+}
+
 // ---------- generation ----------
 
 #[tauri::command]
@@ -481,6 +537,9 @@ pub fn run() {
             probe_media,
             start_preview,
             start_generate,
+            burn_begin,
+            burn_frame,
+            start_burn,
             start_translate,
             cancel_job,
             plan_translation,
