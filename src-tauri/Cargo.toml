@@ -62,6 +62,7 @@ httpmock = "0.9.0"
 codegen-units = 1
 lto = true
 opt-level = 3
-# Unwind (not abort) so a panic inside a background job is reported instead of closing the app.
+# Unwind (not abort): jobs::guard turns a panic inside a background job into an error the
+# interface shows, instead of closing the app.
 panic = "unwind"
 strip = true

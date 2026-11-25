@@ -558,8 +558,9 @@ export function JobError({ error }: { error: AppError }) {
     switch (a) {
       case "retry":
         st.dismissJobError();
-        if (st.view === "workspace") return;
-        void st.startGenerate();
+        // In the workspace the job was a translation: run that again.
+        if (st.view === "workspace") st.retryTranslate();
+        else void st.startGenerate();
         break;
       case "choose-video":
         void browseVideo();

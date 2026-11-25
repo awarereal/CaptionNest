@@ -9,7 +9,7 @@ use super::Word;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::media::{process, wav};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     pub model: PathBuf,
     /// `None` = detect automatically.
@@ -84,6 +84,10 @@ pub async fn transcribe_spans(
 ) -> AppResult<Transcript> {
     if !opts.model.is_file() {
         return Err(AppError::new(ErrorCode::ModelMissing, "The speech recognition model isn't installed yet."));
+    }
+    if spans.is_empty() {
+        // Nothing to listen to (the work below would divide by zero groups).
+        return Ok(Transcript { words: Vec::new(), language: opts.language.clone(), used_gpu: opts.use_gpu, repaired_text: false });
     }
     std::fs::create_dir_all(work_dir)?;
     let info = wav::read_info(wav).map_err(|e| AppError::new(ErrorCode::ToolFailed, "The prepared audio couldn't be read.").with_detail(e.to_string()))?;
@@ -495,6 +499,18 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn no_spans_means_an_empty_transcript_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"x").unwrap();
+        let opts = Options { model, language: Some("bn".into()), threads: 4, word_timestamps: true, ..Default::default() };
+        let t = transcribe_spans(Path::new("whisper-cli"), &dir.path().join("none.wav"), &[], dir.path(), &opts, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
+        assert!(t.words.is_empty());
+    }
 
     #[test]
     fn dtw_moves_word_starts_and_keeps_pauses() {

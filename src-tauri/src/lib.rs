@@ -52,6 +52,8 @@ struct AppInfo {
     gpu_backend: Option<&'static str>,
     models_dir: String,
     log_dir: Option<String>,
+    /// A test build with the automation bridge (turns on the UI's test hooks).
+    automation: bool,
 }
 
 #[tauri::command]
@@ -70,6 +72,7 @@ fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
         gpu_backend,
         models_dir: state.paths.models.to_string_lossy().into_owned(),
         log_dir: app.path().app_log_dir().ok().map(|p| p.to_string_lossy().into_owned()),
+        automation: cfg!(feature = "automation"),
     }
 }
 
@@ -85,22 +88,94 @@ fn show_main_window(app: AppHandle, state: State<AppState>) {
     }
 }
 
-#[tauri::command]
-fn get_settings(state: State<AppState>) -> settings::Settings {
-    state.settings.lock().unwrap().clone()
+/// Settings as the interface sees them: the Sarvam key itself stays in Rust; the
+/// interface gets a masked hint to show that one is saved.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UiSettings {
+    #[serde(flatten)]
+    settings: settings::Settings,
+    sarvam_key_hint: Option<String>,
+}
+
+fn ui_settings(s: &settings::Settings) -> UiSettings {
+    let hint = s.sarvam_api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()).map(voice::mask);
+    UiSettings { settings: settings::Settings { sarvam_api_key: None, ..s.clone() }, sarvam_key_hint: hint }
 }
 
 #[tauri::command]
-fn save_settings(state: State<AppState>, settings: settings::Settings) -> Cmd<()> {
-    settings::save(&state.paths.config, &settings)?;
-    *state.settings.lock().unwrap() = settings;
-    Ok(())
+fn get_settings(state: State<AppState>) -> UiSettings {
+    ui_settings(&state.settings.lock().unwrap())
+}
+
+/// Checks a Sarvam key with Sarvam, then saves it and turns online recognition on.
+#[tauri::command]
+async fn save_online_key(app: AppHandle, key: String) -> Cmd<UiSettings> {
+    let key = key.trim().to_string();
+    // The same check the settings screen used before (it also rejects an empty key).
+    check_online_key(app.state::<AppState>(), key.clone()).await?;
+    off_main(&app, move |state| {
+        let mut s = state.settings.lock().unwrap();
+        let next = settings::Settings { sarvam_api_key: Some(key), online_recognition: true, ..s.clone() };
+        settings::save(&state.paths.config, &next)?;
+        *s = next;
+        Ok(ui_settings(&s))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_online_key(app: AppHandle) -> Cmd<UiSettings> {
+    off_main(&app, |state| {
+        let mut s = state.settings.lock().unwrap();
+        let next = settings::Settings { sarvam_api_key: None, ..s.clone() };
+        settings::save(&state.paths.config, &next)?;
+        *s = next;
+        Ok(ui_settings(&s))
+    })
+    .await
+}
+
+/// Runs file work on a worker thread. Plain (non-async) commands run on the main thread,
+/// where a slow or offline drive, or deleting a large model, would freeze the window.
+async fn off_main<T: Send + 'static>(app: &AppHandle, work: impl FnOnce(&AppState) -> AppResult<T> + Send + 'static) -> AppResult<T> {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || work(app.state::<AppState>().inner()))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?
+}
+
+#[tauri::command]
+async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> {
+    off_main(&app, move |state| {
+        let mut current = state.settings.lock().unwrap();
+        let mut settings = settings;
+        // The recent-projects list is kept here, not in the interface: a copy sent from
+        // the interface may be older than a project that was just opened. The Sarvam key
+        // never goes to the interface, so it's kept too (it changes only through
+        // save_online_key / remove_online_key).
+        settings.recent_projects = current.recent_projects.clone();
+        settings.sarvam_api_key = current.sarvam_api_key.clone();
+        settings::save(&state.paths.config, &settings)?;
+        *current = settings;
+        Ok(())
+    })
+    .await
 }
 
 // ---------- media ----------
 
 /// Lets the web view play a local file through the asset protocol.
 fn allow_media(app: &AppHandle, path: &Path) {
+    // Only audio and video files: a project file can name any path as "its video".
+    const MEDIA: [&str; 21] = [
+        "mp4", "mov", "m4v", "mkv", "webm", "avi", "mts", "m2ts", "ts", "3gp", "flv", "wmv", "mpg", "mpeg", "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus",
+    ];
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !MEDIA.contains(&ext.as_str()) {
+        log::warn!("not granting preview access to a non-media file");
+        return;
+    }
     if let Err(e) = app.asset_protocol_scope().allow_file(path) {
         log::warn!("asset scope: {e}");
     }
@@ -122,7 +197,7 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Preview);
-        let result = async {
+        let result = jobs::guard(async {
             report.stage("converting", Some(0.0), None);
             let info = pipeline::probe(&state.paths, Path::new(&path)).await?;
             let out = media::preview::cache_path(&state.paths.previews, &info, audio_stream_index);
@@ -132,7 +207,7 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
             .await?;
             allow_media(&handle, Path::new(&preview.path));
             Ok::<_, AppError>(preview)
-        }
+        })
         .await;
         jobs::finish(&handle, &state.jobs, JobKind::Preview, &id, result);
     });
@@ -144,6 +219,14 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
 /// A folder for the caption images of one video export. Returns its token.
 #[tauri::command]
 fn burn_begin(state: State<'_, AppState>) -> Cmd<String> {
+    // One export at a time: images left by an export stopped while drawing go now.
+    if !state.jobs.busy(JobKind::Burn) {
+        for entry in std::fs::read_dir(&state.paths.jobs).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with("burn-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
     let id = uuid::Uuid::new_v4().to_string();
     std::fs::create_dir_all(state.paths.jobs.join(format!("burn-{id}")))?;
     Ok(id)
@@ -151,7 +234,7 @@ fn burn_begin(state: State<'_, AppState>) -> Cmd<String> {
 
 /// Saves one caption image (PNG bytes as the raw request body).
 #[tauri::command]
-fn burn_frame(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Cmd<()> {
+async fn burn_frame(app: AppHandle, request: tauri::ipc::Request<'_>) -> Cmd<()> {
     let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
     let (Some(id), Some(file)) = (header("x-burn-id"), header("x-file")) else {
         return Err(AppError::internal("caption image without a name"));
@@ -162,18 +245,26 @@ fn burn_frame(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> C
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(AppError::internal("caption image must be sent as bytes"));
     };
-    let dir = state.paths.jobs.join(format!("burn-{id}"));
-    if !dir.is_dir() {
-        return Err(AppError::internal("caption image folder is gone"));
-    }
-    std::fs::write(dir.join(file), bytes)?;
-    Ok(())
+    let bytes = bytes.clone();
+    off_main(&app, move |state| {
+        let dir = state.paths.jobs.join(format!("burn-{id}"));
+        if !dir.is_dir() {
+            return Err(AppError::internal("caption image folder is gone"));
+        }
+        std::fs::write(dir.join(file), bytes)?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::burn::BurnRequest) -> Cmd<String> {
-    if uuid::Uuid::parse_str(&request.frames_id).is_err() || !media::burn::valid_frame_name(&request.blank) {
-        return Err(AppError::internal("invalid caption image folder"));
+    if uuid::Uuid::parse_str(&request.frames_id).is_err()
+        || !media::burn::valid_frame_name(&request.blank)
+        || !request.cues.iter().all(|c| media::burn::valid_frame_name(&c.file))
+    {
+        // Every image must be one of this export's own files (FFmpeg reads them by name).
+        return Err(AppError::internal("invalid caption image name"));
     }
     let (job_id, cancel) = state.jobs.begin(JobKind::Burn);
     let id = job_id.clone();
@@ -183,12 +274,12 @@ async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Burn);
         // The images are removed when the export ends, however it ends.
         let frames = jobs::ScratchDir::create(&state.paths.jobs, &format!("burn-{}", request.frames_id));
-        let result = async {
+        let result = jobs::guard(async {
             let frames = frames?;
             report.stage("rendering", Some(0.0), None);
             let info = pipeline::probe(&state.paths, Path::new(&request.video_path)).await?;
             media::burn::burn(&state.paths.tool("ffmpeg")?, &info, &request, frames.path(), &cancel, |p| report.stage("rendering", Some(p), None)).await
-        }
+        })
         .await;
         jobs::finish(&handle, &state.jobs, JobKind::Burn, &id, result);
     });
@@ -205,7 +296,7 @@ async fn start_sync(app: AppHandle, state: State<'_, AppState>, request: pipelin
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Sync);
-        let result = pipeline::resync_captions(&state.paths, request, &id, &cancel, &report).await;
+        let result = jobs::guard(pipeline::resync_captions(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Sync, &id, result);
     });
     Ok(job_id)
@@ -224,8 +315,8 @@ async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
 // ---------- caption fonts the user adds ----------
 
 #[tauri::command]
-fn list_fonts(state: State<AppState>) -> Vec<fonts::UserFont> {
-    fonts::list(&state.paths.fonts)
+async fn list_fonts(app: AppHandle) -> Cmd<Vec<fonts::UserFont>> {
+    off_main(&app, |state| Ok(fonts::list(&state.paths.fonts))).await
 }
 
 #[tauri::command]
@@ -248,8 +339,8 @@ async fn font_file(state: State<'_, AppState>, file: String) -> Cmd<tauri::ipc::
 }
 
 #[tauri::command]
-fn remove_font(state: State<AppState>, id: String) -> Cmd<Vec<fonts::UserFont>> {
-    fonts::remove(&state.paths.fonts, &id)
+async fn remove_font(app: AppHandle, id: String) -> Cmd<Vec<fonts::UserFont>> {
+    off_main(&app, move |state| fonts::remove(&state.paths.fonts, &id)).await
 }
 
 // ---------- voice typing ----------
@@ -304,7 +395,7 @@ async fn start_generate(app: AppHandle, state: State<'_, AppState>, request: pip
         let mut request = request;
         let key = state.settings.lock().unwrap().online_key();
         request.online = key.map(|key| asr::sarvam::Online::new(key, state.http.clone()));
-        let result = pipeline::generate(&state.paths, request, &id, &cancel, &report).await;
+        let result = jobs::guard(pipeline::generate(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });
     Ok(job_id)
@@ -318,7 +409,7 @@ async fn start_translate(app: AppHandle, state: State<'_, AppState>, request: pi
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Generate);
-        let result = pipeline::translate_existing(&state.paths, request, &id, &cancel, &report).await;
+        let result = jobs::guard(pipeline::translate_existing(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });
     Ok(job_id)
@@ -367,7 +458,12 @@ struct ModelState {
 }
 
 #[tauri::command]
-fn model_state(state: State<AppState>) -> ModelState {
+async fn model_state(app: AppHandle) -> Cmd<ModelState> {
+    // Sizing the models folder reads every file in it.
+    off_main(&app, |state| Ok(model_state_now(state))).await
+}
+
+fn model_state_now(state: &AppState) -> ModelState {
     let p = &state.paths;
     let active = state.jobs.active_downloads();
     let whisper = catalog::whisper()
@@ -423,7 +519,7 @@ async fn download_model(app: AppHandle, state: State<'_, AppState>, id: String) 
         let emit = |s: &'static str, received: u64, total: u64, bps: f64, error: Option<AppError>| {
             let _ = handle.emit("download-progress", DownloadEvent { id: id.clone(), state: s, received, total, bytes_per_sec: bps, error });
         };
-        let result = install(&state, &id, &cancel, &emit).await;
+        let result = jobs::guard(install(&state, &id, &cancel, &emit)).await;
         state.jobs.end_download(&id);
         match result {
             Ok(total) => emit("done", total, total, 0.0, None),
@@ -475,15 +571,21 @@ fn cancel_download(state: State<AppState>, id: String) {
 }
 
 #[tauri::command]
-fn remove_model(state: State<AppState>, id: String) -> Cmd<()> {
-    if let Some(m) = catalog::whisper_model(&id) {
-        return models::remove_whisper(&state.paths, m);
-    }
-    if let Some(pkg) = catalog::argos_package(&id) {
-        let _ = std::fs::remove_file(models::download::part_path(&state.paths.downloads().join(format!("{}.argosmodel", pkg.id))));
-        return models::remove_argos(&state.paths, pkg);
-    }
-    Err(AppError::internal(format!("unknown model {id}")))
+async fn remove_model(app: AppHandle, id: String) -> Cmd<()> {
+    off_main(&app, move |state| {
+        if state.jobs.busy(JobKind::Generate) {
+            return Err(AppError::new(ErrorCode::Io, "Captions are being made with the installed models. Remove it when that's finished."));
+        }
+        if let Some(m) = catalog::whisper_model(&id) {
+            return models::remove_whisper(&state.paths, m);
+        }
+        if let Some(pkg) = catalog::argos_package(&id) {
+            let _ = std::fs::remove_file(models::download::part_path(&state.paths.downloads().join(format!("{}.argosmodel", pkg.id))));
+            return models::remove_argos(&state.paths, pkg);
+        }
+        Err(AppError::internal(format!("unknown model {id}")))
+    })
+    .await
 }
 
 // ---------- captions & export ----------
@@ -508,7 +610,11 @@ struct ExportResult {
 }
 
 #[tauri::command]
-fn export_srt(path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
+async fn export_srt(app: AppHandle, path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
+    off_main(&app, move |_| write_srt(path, cues)).await
+}
+
+fn write_srt(path: String, cues: Vec<Cue>) -> AppResult<ExportResult> {
     let report = validate::validate(&cues);
     if report.has_blocking() {
         return Err(AppError::new(ErrorCode::ExportInvalid, "Some captions need fixing before export.")
@@ -527,29 +633,40 @@ fn export_srt(path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
 }
 
 #[tauri::command]
-fn import_srt(path: String) -> Cmd<Vec<Cue>> {
-    let bytes = std::fs::read(&path)?;
-    let text = String::from_utf8(bytes).map_err(|_| AppError::new(ErrorCode::ProjectInvalid, "This SRT file isn't UTF-8 text."))?;
-    captions::srt::parse_srt(&text).map_err(|e| AppError::new(ErrorCode::ProjectInvalid, "This SRT file couldn't be read.").with_detail(e))
+async fn import_srt(app: AppHandle, path: String) -> Cmd<Vec<Cue>> {
+    off_main(&app, move |_| {
+        let bytes = std::fs::read(&path)?;
+        let text = String::from_utf8(bytes).map_err(|_| AppError::new(ErrorCode::ProjectInvalid, "This SRT file isn't UTF-8 text."))?;
+        captions::srt::parse_srt(&text).map_err(|e| AppError::new(ErrorCode::ProjectInvalid, "This SRT file couldn't be read.").with_detail(e))
+    })
+    .await
 }
 
 // ---------- projects ----------
 
 #[tauri::command]
-fn save_project(app: AppHandle, state: State<AppState>, path: String, project: project::Project) -> Cmd<()> {
-    project::save(Path::new(&path), &project)?;
-    remember_project(&app, &state, &path, &project);
-    Ok(())
+async fn save_project(app: AppHandle, path: String, project: project::Project) -> Cmd<()> {
+    let handle = app.clone();
+    off_main(&app, move |state| {
+        project::save(Path::new(&path), &project)?;
+        remember_project(&handle, state, &path, &project);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-fn load_project(app: AppHandle, state: State<AppState>, path: String) -> Cmd<project::LoadedProject> {
-    let loaded = project::load(Path::new(&path))?;
-    if let project::VideoStatus::Found { path: v } | project::VideoStatus::Changed { path: v } = &loaded.video_status {
-        allow_media(&app, Path::new(v));
-    }
-    remember_project(&app, &state, &path, &loaded.project);
-    Ok(loaded)
+async fn load_project(app: AppHandle, path: String) -> Cmd<project::LoadedProject> {
+    let handle = app.clone();
+    off_main(&app, move |state| {
+        let loaded = project::load(Path::new(&path))?;
+        if let project::VideoStatus::Found { path: v } | project::VideoStatus::Changed { path: v } = &loaded.video_status {
+            allow_media(&handle, Path::new(v));
+        }
+        remember_project(&handle, state, &path, &loaded.project);
+        Ok(loaded)
+    })
+    .await
 }
 
 fn remember_project(_app: &AppHandle, state: &AppState, path: &str, p: &project::Project) {
@@ -564,15 +681,20 @@ fn remember_project(_app: &AppHandle, state: &AppState, path: &str, p: &project:
 }
 
 #[tauri::command]
-fn forget_recent(state: State<AppState>, path: String) -> Cmd<()> {
-    let mut s = state.settings.lock().unwrap();
-    s.recent_projects.retain(|r| r.path != path);
-    settings::save(&state.paths.config, &s)
+async fn forget_recent(app: AppHandle, path: String) -> Cmd<()> {
+    off_main(&app, move |state| {
+        let mut s = state.settings.lock().unwrap();
+        s.recent_projects.retain(|r| r.path != path);
+        settings::save(&state.paths.config, &s)
+    })
+    .await
 }
 
+/// Off the main thread: a recent project on an offline network drive can take a long
+/// time to answer.
 #[tauri::command]
-fn path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+async fn path_exists(app: AppHandle, path: String) -> Cmd<bool> {
+    off_main(&app, move |_| Ok(Path::new(&path).exists())).await
 }
 
 #[tauri::command]
@@ -586,6 +708,12 @@ fn now_ms() -> i64 {
 pub fn run() {
     let self_test = selftest::SelfTest::from_args();
     let is_self_test = self_test.is_some();
+    // Release builds have no console: put panics in the log file as well.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic: {info}");
+        default_hook(info);
+    }));
 
     let mut builder = tauri::Builder::default();
     // A test build driven through the automation bridge runs next to an installed copy.
@@ -630,7 +758,8 @@ pub fn run() {
             if let Some(test) = self_test.clone() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let code = selftest::run(&handle, test).await;
+                    // A crash still ends the process with a failure code instead of hanging CI.
+                    let code = jobs::guard(async { Ok::<_, AppError>(selftest::run(&handle, test).await) }).await.unwrap_or(3);
                     handle.exit(code);
                 });
             }
@@ -641,6 +770,8 @@ pub fn run() {
             show_main_window,
             get_settings,
             save_settings,
+            save_online_key,
+            remove_online_key,
             probe_media,
             start_preview,
             start_generate,

@@ -48,8 +48,10 @@ pub async fn create_preview(
     cancel: &CancellationToken,
     mut on_progress: impl FnMut(f32),
 ) -> AppResult<Preview> {
+    let audio_only_marker = out.with_extension("audio-only");
     if out.is_file() {
-        return Ok(Preview { path: out.to_string_lossy().into_owned(), has_video: info.video.is_some() });
+        let has_video = info.video.is_some() && !audio_only_marker.exists();
+        return Ok(Preview { path: out.to_string_lossy().into_owned(), has_video });
     }
     paths::ensure_space(out, info.size_bytes / 2 + 100_000_000, "to create a preview")?;
 
@@ -92,6 +94,10 @@ pub async fn create_preview(
         match result {
             Ok(o) if o.status.success() => {
                 std::fs::rename(&tmp, out)?;
+                if mode == VideoMode::None {
+                    // Remember that this copy has no picture, for the next time it's used.
+                    let _ = std::fs::write(&audio_only_marker, b"");
+                }
                 on_progress(1.0);
                 return Ok(Preview { path: out.to_string_lossy().into_owned(), has_video: mode != VideoMode::None });
             }

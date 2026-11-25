@@ -28,10 +28,6 @@ import "./styles/screens.css";
 import "./styles/workspace.css";
 
 import App from "./App";
-import { useStore } from "./state/store";
-
-// Read-only handle for automated UI tests (scripts/dev). The page loads no remote content.
-(window as unknown as { __CN_STORE__: typeof useStore }).__CN_STORE__ = useStore;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

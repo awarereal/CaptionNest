@@ -79,7 +79,10 @@ python3 scripts/dev/verify_suite.py                     # checks behind docs/VER
 python3 scripts/dev/ui_audit.py <label>                 # every screen at 1360x860 and 900x600: layout checks + snapshots
 ```
 
-The zustand store is exposed as `window.__CN_STORE__` for these scripts.
+In builds with the `automation` feature (and only there), the zustand store is exposed as
+`window.__CN_STORE__` and `window.__CN_AUTOMATION__` stands in for file dialogs. The
+bridge refuses requests that carry browser headers (Origin, Referer, Sec-Fetch-*) or a
+non-loopback Host, so a web page can't drive the app.
 `scripts/dev/make-test-media.sh` and `make_long_video.py` create test videos with known
 speech. The automation feature never ships in release builds.
 
@@ -115,6 +118,11 @@ Notes on automation:
   Model downloads are tracked separately by model id and emit `download-progress`.
 - Each job gets a `ScratchDir` that is deleted when the job ends; `sweep_abandoned` cleans
   leftovers at startup.
+- Wrap a job's work in `jobs::guard(...)` so a panic still ends the job with an error;
+  otherwise the interface waits forever for `job-finished`.
+- Plain (non-async) commands run on the main thread. Any command that touches the disk
+  must be `async` and do its work through `off_main` in `lib.rs`, or a slow drive
+  freezes the window.
 
 ### Generation pipeline (`src-tauri/src/pipeline.rs`)
 
@@ -209,7 +217,10 @@ and re-measure instead of guessing.
   Icons come from Phosphor only; toasts from sonner.
 - The CSP in `src-tauri/tauri.conf.json` allows only IPC for `connect-src`, and fonts are
   bundled through `@fontsource`. The web view can't reach the network, so all network
-  access (model downloads, Sarvam, Deepgram) happens in Rust. New plugin APIs also need a permission
+  access (model downloads, Sarvam, Deepgram) happens in Rust. API keys never reach the
+  web view: `get_settings` returns a masked `sarvamKeyHint`, and keys change only through
+  `save_online_key` / `remove_online_key` and `save_voice_key` / `remove_voice_key`.
+  `opener:allow-open-url` lists the exact sites the app links to. New plugin APIs also need a permission
   in `src-tauri/capabilities/default.json`.
 - The caption list (`components/CueList.tsx`) is virtualized with @tanstack/react-virtual.
   Rows stack in normal flow inside one block shifted by the first item's start, so a
@@ -249,6 +260,10 @@ and re-measure instead of guessing.
   jargon (say "speech model", not "ggml"). UI polish is a primary deliverable: check UI
   changes with snapshots of the real app through the automation bridge.
 - Comments and docs explain *why*, with measured numbers where a choice came from a benchmark.
-- FFmpeg must stay LGPL-only and unmodified. After dependency changes, regenerate the
-  license list with `node scripts/licenses/collect.mjs`.
+- FFmpeg must stay LGPL-only and unmodified. After dependency changes, run
+  `node scripts/licenses/collect.mjs`: it rewrites `DEPENDENCIES.txt` and
+  `THIRD_PARTY_LICENSES.txt` (the license texts and copyright notices that BSD, ISC,
+  Zlib, MPL, Unicode and OFL packages require) in `src-tauri/resources/licenses/`.
+- Pin downloads to fixed versions: Hugging Face `resolve/<commit>/` URLs, never
+  `resolve/main/`, and GitHub Actions by commit SHA.
 - Releases stay drafts until the maintainer publishes them.

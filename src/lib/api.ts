@@ -109,6 +109,9 @@ export const api = {
   importSrt: (path: string) => call<Cue[]>("import_srt", { path }),
 
   checkOnlineKey: (key: string) => call<void>("check_online_key", { key }),
+  /** Checks the Sarvam key, saves it in Rust and returns the settings (with a masked hint). */
+  saveOnlineKey: (key: string) => call<Settings>("save_online_key", { key }),
+  removeOnlineKey: () => call<Settings>("remove_online_key"),
   startSync: (request: SyncRequest) => call<string>("start_sync", { request }),
 
   burnBegin: () => call<string>("burn_begin"),

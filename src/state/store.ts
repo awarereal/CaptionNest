@@ -7,6 +7,7 @@ import { createHistory, record, redo as redoH, undo as undoH, type History } fro
 import { DEFAULT_MODEL_ID, MODEL_INFO } from "../lib/models";
 import { lastStyle, normalizeStyle, rememberStyle, type CaptionStyle } from "../lib/captionStyle";
 import { useBurn } from "./burn";
+import { usePlayhead } from "./playhead";
 import type {
   AppError,
   AppInfo,
@@ -23,6 +24,9 @@ import type {
   Stage,
   Track,
 } from "../lib/types";
+
+/** The language of the last translation started, for "Try again". */
+let lastTranslateTarget: string | null = null;
 
 export type View = "loading" | "setup" | "home" | "prepare" | "workspace";
 
@@ -93,6 +97,8 @@ interface Store {
   requestPreview: () => Promise<void>;
   startGenerate: () => Promise<void>;
   startTranslate: (target: string) => Promise<void>;
+  /** Runs the last translation again (after it failed). */
+  retryTranslate: () => void;
   cancelJob: () => Promise<void>;
   dismissJobError: () => void;
   onJobProgress: (e: ProgressEvent) => void;
@@ -299,7 +305,12 @@ export const useStore = create<Store>((set, get) => {
       }
     },
 
+    retryTranslate() {
+      if (lastTranslateTarget) void get().startTranslate(lastTranslateTarget);
+    },
+
     async startTranslate(target) {
+      lastTranslateTarget = target;
       const { project, history, settings, audioStream } = get();
       if (!project || !settings) return;
       const source = history.present.find((t) => t.kind === "original") ?? history.present[0];
@@ -376,7 +387,8 @@ export const useStore = create<Store>((set, get) => {
       }
       if (e.kind === "preview") {
         const p = get().preview;
-        if (p.jobId && p.jobId !== e.jobId) return;
+        // Only the conversion this screen asked for: not one for a video closed since.
+        if (p.status !== "converting" || (p.jobId && p.jobId !== e.jobId)) return;
         if (e.outcome.status === "success") {
           const r = e.outcome.result as Preview;
           set({ preview: { status: r.hasVideo ? "ready" : "audio-only", url: mediaUrl(r.path) } });
@@ -492,7 +504,10 @@ export const useStore = create<Store>((set, get) => {
       if (!project) return;
       const next: Project = { ...project, tracks: history.present, activeTrackId, style, updatedAtMs: Date.now() };
       await api.saveProject(path, next);
-      set({ project: next, projectPath: path, dirty: false });
+      // Edits made while the file was being written are not in it: keep them marked unsaved.
+      const after = get();
+      const unchanged = after.history.present === next.tracks && after.style === style;
+      set({ project: next, projectPath: path, dirty: !unchanged });
       const s = get().settings;
       if (s) set({ settings: { ...s, recentProjects: (await api.getSettings()).recentProjects } });
     },
@@ -603,3 +618,12 @@ export const installedModelIds = (models: ModelState | null) =>
 
 export const canTranslateInstalled = (models: ModelState | null) =>
   (models?.whisper ?? []).some((m) => m.installed && (MODEL_INFO[m.id]?.translates ?? m.canTranslate));
+
+// A different video (or none): stop any preview conversion for the old one, and start
+// the playhead at the beginning so captions aren't added at the old video's time.
+useStore.subscribe((now, before) => {
+  if (now.media?.path === before.media?.path) return;
+  const p = before.preview;
+  if (p.status === "converting" && p.jobId) void api.cancelJob(p.jobId).catch(() => undefined);
+  usePlayhead.getState().set({ ms: 0, playing: false });
+});

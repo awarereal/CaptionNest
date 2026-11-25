@@ -131,6 +131,9 @@ async fn fetch_into_part(
     } else if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
         file.set_len(0)?;
         return Err(AppError::new(ErrorCode::Network, "The download had to restart.").with_detail("416 from server"));
+    } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        // A busy or briefly failing server: retried with a pause.
+        return Err(AppError::new(ErrorCode::Network, "The download server is busy. Trying again…").with_detail(format!("HTTP {status} for {url}")));
     } else {
         return Err(AppError::new(ErrorCode::DownloadFailed, "The download server returned an error. Please try again later.")
             .with_detail(format!("HTTP {status} for {url}")));

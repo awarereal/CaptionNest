@@ -1,6 +1,6 @@
 // Editable timecode. Type a time, or nudge with arrow keys:
 // ↑/↓ = 0.1 s, Shift = 1 s, Alt = 0.01 s. Invalid input reverts.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatTimecode, parseTimecode } from "../lib/time";
 
 export function TimeField({
@@ -17,6 +17,8 @@ export function TimeField({
   const [text, setText] = useState(formatTimecode(value));
   const [bad, setBad] = useState(false);
   const [focused, setFocused] = useState(false);
+  /** Esc was pressed: the blur that follows must not commit the typed text. */
+  const cancelled = useRef(false);
 
   useEffect(() => {
     if (!focused) setText(formatTimecode(value));
@@ -49,6 +51,10 @@ export function TimeField({
       }}
       onBlur={() => {
         setFocused(false);
+        if (cancelled.current) {
+          cancelled.current = false;
+          return;
+        }
         commit();
       }}
       onKeyDown={(e) => {
@@ -57,6 +63,7 @@ export function TimeField({
           commit();
           (e.target as HTMLInputElement).blur();
         } else if (e.key === "Escape") {
+          cancelled.current = true;
           setText(formatTimecode(value));
           (e.target as HTMLInputElement).blur();
         } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {

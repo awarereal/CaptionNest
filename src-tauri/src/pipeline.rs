@@ -36,8 +36,9 @@ pub struct GenerateRequest {
     /// Use a language-specialised model (e.g. Bangla) when one is installed. Default on.
     #[serde(default)]
     pub use_language_models: Option<bool>,
-    /// Testing only: use this model file instead of a catalog model.
-    #[serde(default)]
+    /// Testing only (set by the self-test, never accepted from the interface): use this
+    /// model file instead of a catalog model.
+    #[serde(skip)]
     pub model_path_override: Option<String>,
     /// Online recognition (filled in from Settings by the app, never sent by the UI).
     #[serde(skip)]
@@ -80,7 +81,7 @@ struct Ctx<'a> {
     speech: vad::Segments,
 }
 
-pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
+pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
     report.stage("preparing", None, None);
     let video = PathBuf::from(&req.video_path);
     if !video.is_file() {
@@ -111,6 +112,10 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg, speech: Vec::new() };
 
     let wav = extract_wav(&ctx, &video, req.audio_stream_index, req.duration_ms).await?;
+    if req.duration_ms <= 0 {
+        // Some files (e.g. browser recordings) don't state their length; the audio does.
+        req.duration_ms = crate::media::wav::read_info(&wav).map(|i| i.duration_ms()).unwrap_or(0);
+    }
 
     report.stage("transcribing", None, Some("listening".into()));
     let speech = find_speech(&ctx, &wav).await?;
@@ -128,12 +133,16 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         dtw: false,
     };
     let mut uncertain = None;
+    // Whether the language is known well enough to tell online recognition which one to
+    // expect: chosen by the user, or detected confidently by the Accurate model.
+    let mut language_trusted = spoken.is_some();
     let can_detect = offline_model.is_ok() || catalog::whisper_model(DETECTION_MODEL).is_some_and(|m| models::whisper_installed(paths, m));
     if opts.language.is_none() && can_detect {
         // The Accurate model identifies languages far more reliably (on real Bangla speech
         // it was right 20 of 20 times; the Fast model 3 of 20), so it detects when present.
         let mut detect_opts = opts.clone();
-        if let Some(m) = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m)) {
+        let accurate = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m));
+        if let Some(m) = accurate {
             detect_opts.model = models::whisper_path(paths, m);
         }
         // Listen at up to three places (start, middle, later) and vote, so a music
@@ -144,6 +153,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
             if confidence < 0.5 {
                 uncertain = Some(format!("language_uncertain:{lang}:{confidence:.2}"));
             }
+            language_trusted = accurate.is_some() && confidence >= 0.5;
             opts.language = Some(lang);
         }
     }
@@ -177,9 +187,11 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let word_timing = std::env::var("CAPTIONNEST_WORD_TIMING").unwrap_or_else(|_| "sparse".into());
     let timing_opts = online.as_ref().filter(|_| word_timing != "0").and_then(|_| timing_options(paths, &opts, offline_model.as_ref().ok()));
     if let Some(online) = &online {
+        // A guess from a weaker model (the Fast model named Bangla correctly only 3 of 20
+        // times) would make Sarvam write the wrong language: let Sarvam detect it instead.
         let code = match opts.language.as_deref() {
-            Some(l) => sarvam::language_code(l),
-            None => Some("unknown"),
+            Some(l) if language_trusted => sarvam::language_code(l),
+            _ => Some("unknown"),
         };
         match code {
             Some(code) => match recognize_online(&ctx, &wav, online, code, req.duration_ms).await {
@@ -276,6 +288,7 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
         warnings.push(format!("unrecognized:{}", missed.len()));
         cues.extend(missed.iter().map(|&(s, e)| Cue::new(s, e, "")));
         cues.sort_by_key(|c| (c.start_ms, c.end_ms));
+        fit_placeholders(&mut cues);
     }
     let original = Track {
         id: uuid::Uuid::new_v4().to_string(),
@@ -289,11 +302,21 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let mut tracks = vec![original.clone()];
     let target = req.caption_language.as_str();
     if target != "same" && target != language {
-        let (extra, used_gpu) = translate_track(&ctx, &wav, &original, target, &req.transcribe_model_id, req.translate_model_id.as_deref(), req.use_gpu, req.duration_ms).await?;
-        if req.use_gpu && !used_gpu && !warnings.contains(&"gpu_fallback".to_string()) {
-            warnings.push("gpu_fallback".to_string());
+        match translate_track(&ctx, &wav, &original, target, &req.transcribe_model_id, req.translate_model_id.as_deref(), req.use_gpu, req.duration_ms).await {
+            Ok((extra, used_gpu)) => {
+                if req.use_gpu && !used_gpu && !warnings.contains(&"gpu_fallback".to_string()) {
+                    warnings.push("gpu_fallback".to_string());
+                }
+                tracks.extend(extra);
+            }
+            Err(e) if e.is_cancelled() => return Err(e),
+            // The captions in the spoken language are finished work: keep them and say
+            // what went wrong with the translation, instead of failing the whole job.
+            Err(e) => {
+                log::warn!("translation after recognition failed: {e:?}");
+                warnings.push(format!("translation_failed:{target}:{}", e.message));
+            }
         }
-        tracks.extend(extra);
     }
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
@@ -578,11 +601,14 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
         // A different decoding context: no initial prompt.
         let mut retry_opts = opts.clone();
         retry_opts.prompt = None;
-        if let Ok(t2) = whisper::transcribe_spans(&cli, wav, &retry, &dir, &retry_opts, ctx.cancel, |p| {
+        let rechecked = whisper::transcribe_spans(&cli, wav, &retry, &dir, &retry_opts, ctx.cancel, |p| {
             ctx.report.stage(stage, Some(weight + p * (1.0 - weight)), detail.clone())
         })
-        .await
-        {
+        .await;
+        if ctx.cancel.is_cancelled() {
+            return Err(AppError::cancelled());
+        }
+        if let Ok(t2) = rechecked {
             let extra = vad::keep_speech(t2.words, &gaps, 300);
             t.used_gpu &= t2.used_gpu;
             t.repaired_text |= t2.repaired_text;
@@ -593,11 +619,29 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
     let lang = opts.language.clone().or_else(|| t.language.clone()).unwrap_or_default();
     if !opts.translate && script::uses_bengali_script(&lang) {
         for w in &mut t.words {
-            w.text = script::devanagari_to_bengali(&w.text);
+            w.text = script::to_bengali_script(&w.text, &lang);
         }
     }
     let missed = if opts.translate { Vec::new() } else { vad::uncovered(&ctx.speech, &t.words, 300, 1_500) };
     Ok((t, missed))
+}
+
+/// Empty "listen and type" captions sit between their neighbours instead of overlapping
+/// them (recognized captions are stretched to a minimum length before these are added).
+fn fit_placeholders(cues: &mut Vec<Cue>) {
+    for i in 0..cues.len() {
+        if !cues[i].text.is_empty() {
+            continue;
+        }
+        if i > 0 {
+            cues[i].start_ms = cues[i].start_ms.max(cues[i - 1].end_ms);
+        }
+        if i + 1 < cues.len() {
+            cues[i].end_ms = cues[i].end_ms.min(cues[i + 1].start_ms);
+        }
+    }
+    // A sliver too short to listen to is dropped; the speech is inside a neighbour.
+    cues.retain(|c| !c.text.is_empty() || c.end_ms - c.start_ms >= 300);
 }
 
 /// Start times (ms) of up to three speech regions spread across the video.
@@ -871,6 +915,14 @@ pub async fn probe(paths: &Paths, path: &Path) -> AppResult<probe::MediaInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listen_and_type_captions_fit_between_their_neighbours() {
+        let mut cues = vec![Cue::new(1_000, 1_820, "Hi."), Cue::new(1_500, 4_000, ""), Cue::new(3_800, 5_000, "Bye."), Cue::new(5_000, 5_100, "")];
+        fit_placeholders(&mut cues);
+        assert_eq!(cues.len(), 3, "a 100 ms sliver is dropped");
+        assert_eq!((cues[1].start_ms, cues[1].end_ms), (1_820, 3_800));
+    }
 
     #[test]
     fn detection_listens_across_the_video() {

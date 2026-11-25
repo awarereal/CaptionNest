@@ -171,7 +171,8 @@ pub fn localize(text: &str, lang: &str) -> String {
                 out.push('₹');
             } else {
                 out.push_str(&bengali_digits(amount));
-                out.push_str(" টাকা");
+                // Assamese writes the currency word টকা.
+                out.push_str(if lang == "as" { " টকা" } else { " টাকা" });
             }
             out.push_str(&tail);
         } else {

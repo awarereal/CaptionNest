@@ -86,6 +86,11 @@ impl Jobs {
         }
     }
 
+    /// Whether a job of `kind` is running.
+    pub fn busy(&self, kind: JobKind) -> bool {
+        self.active.lock().unwrap().contains_key(&kind)
+    }
+
     pub fn active_downloads(&self) -> Vec<String> {
         self.downloads.lock().unwrap().keys().cloned().collect()
     }
@@ -157,6 +162,24 @@ impl Reporter {
     }
 }
 
+/// Runs a job's work and turns a panic into an error, so the job still finishes and the
+/// interface never waits forever for a result that can't come.
+pub async fn guard<T>(work: impl std::future::Future<Output = Result<T, AppError>>) -> Result<T, AppError> {
+    use futures_util::FutureExt;
+    match std::panic::AssertUnwindSafe(work).catch_unwind().await {
+        Ok(result) => result,
+        Err(panic) => {
+            let what = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".into());
+            log::error!("background job panicked: {what}");
+            Err(AppError::internal(format!("background job stopped unexpectedly: {what}")))
+        }
+    }
+}
+
 /// Sends the result if the job is still current; outdated results are discarded.
 pub fn finish<T: Serialize + Clone>(app: &AppHandle, jobs: &Jobs, kind: JobKind, job_id: &str, result: Result<T, AppError>) {
     if !jobs.finish(kind, job_id) {
@@ -209,6 +232,16 @@ pub fn sweep_abandoned(jobs_root: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_panicking_job_becomes_an_error() {
+        let ok = guard(async { Ok::<_, AppError>(7) }).await;
+        assert_eq!(ok.unwrap(), 7);
+        let crashed: Result<i32, AppError> = guard(async { panic!("boom") }).await;
+        let e = crashed.unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::Internal);
+        assert!(e.detail.unwrap_or_default().contains("boom"));
+    }
 
     #[test]
     fn new_job_cancels_and_replaces_previous() {

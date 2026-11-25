@@ -8,6 +8,7 @@ import { api, events } from "./lib/api";
 import { useStore } from "./state/store";
 import { useVoice } from "./state/voice";
 import { useUserFonts } from "./lib/userFonts";
+import { enableAutomation } from "./lib/automation";
 import { confirmDiscard, openPath } from "./lib/fileFlows";
 import { ConfirmHost } from "./components/Confirm";
 import { TopBar } from "./components/TopBar";
@@ -34,6 +35,9 @@ export default function App() {
       events.onDownload(st.onDownload),
     ];
     st.init()
+      .then(() => {
+        if (useStore.getState().info?.automation) enableAutomation(useStore);
+      })
       .catch((e) => setBootError(String(e?.message ?? e)))
       .finally(() => requestAnimationFrame(() => void api.showWindow()));
     // Caption fonts the user added load in the background; previews redraw when ready.

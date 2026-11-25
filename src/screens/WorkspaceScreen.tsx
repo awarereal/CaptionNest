@@ -76,6 +76,13 @@ export function WorkspaceScreen() {
             these captions were made with the offline model.
           </Banner>
         )}
+        {warnings.some((w) => w.startsWith("translation_failed:")) && (
+          <TranslationFailed
+            warning={warnings.find((w) => w.startsWith("translation_failed:"))!}
+            onRetry={() => setTranslateOpen(true)}
+            onClose={() => useStore.setState({ warnings: warnings.filter((w) => !w.startsWith("translation_failed:")) })}
+          />
+        )}
         {warnings.includes("online_unsupported_language") && (
           <Banner tone="teal" onClose={() => useStore.setState({ warnings: warnings.filter((w) => w !== "online_unsupported_language") })}>
             Sarvam doesn't recognize this language, so these captions were made with the offline model.
@@ -113,7 +120,27 @@ export function WorkspaceScreen() {
   );
 }
 
-function Banner({ tone, children, onClose, action }: { tone: "gold" | "teal" | "danger"; children: React.ReactNode; onClose?: () => void; action?: React.ReactNode }) {
+/** Recognition finished but the translation didn't: the original captions are kept. */
+function TranslationFailed({ warning, onRetry, onClose }: { warning: string; onRetry: () => void; onClose: () => void }) {
+  const [, lang, ...rest] = warning.split(":");
+  const why = rest.join(":").trim();
+  return (
+    <Banner
+      tone="gold"
+      onClose={onClose}
+      action={
+        <Button size="sm" variant="secondary" onClick={onRetry}>
+          Add language
+        </Button>
+      }
+    >
+      Your captions are ready, but the {languageName(lang)} translation couldn't be made{why ? `: ${why}` : "."} You can try it again with Add
+      language.
+    </Banner>
+  );
+}
+
+function Banner({ tone, children, onClose, action }:{ tone: "gold" | "teal" | "danger"; children: React.ReactNode; onClose?: () => void; action?: React.ReactNode }) {
   return (
     <div className={`banner banner--${tone}`} role="status">
       {tone === "danger" ? <WarningCircle size={17} weight="fill" /> : <Info size={17} />}
@@ -532,11 +559,17 @@ function useShortcuts() {
       // Key events can come from the document itself (nothing focused), not only elements.
       const target = e.target instanceof Element ? e.target : null;
       const typing = target?.closest("input, textarea, [contenteditable]") != null;
+      // Buttons, switches, tabs, menus: Space and Backspace belong to them.
+      const control = target?.closest("button, a, select, [role=switch], [role=tab], [role=radio], [role=slider], [role=menuitem], [role=option]") != null;
+      const smallInput = target?.closest("input") != null;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (document.querySelector(".modal, .overlay")) return;
 
-      if (mod && key === "z") {
+      if (mod && (key === "z" || key === "y") && smallInput) {
+        // Undo inside a time or number field undoes that field's typing.
+        return;
+      } else if (mod && key === "z") {
         e.preventDefault();
         if (e.shiftKey) st.redo();
         else st.undo();
@@ -565,10 +598,12 @@ function useShortcuts() {
           usePlayhead.getState().seek(next.startMs);
           st.selectCue(next.id);
         }
-      } else if (!typing && e.key === " ") {
+      } else if (!typing && !control && e.key === " ") {
         e.preventDefault();
         usePlayhead.getState().togglePlay();
-      } else if (!typing && (e.key === "Delete" || e.key === "Backspace") && st.selectedCueId) {
+      } else if (!typing && !control && (e.key === "Delete" || e.key === "Backspace") && st.selectedCueId) {
+        // Only a caption the user can see: never one scrolled out of view.
+        if (!document.querySelector(`[data-cue-id="${CSS.escape(st.selectedCueId)}"]`)) return;
         e.preventDefault();
         st.deleteCue(st.selectedCueId);
       }

@@ -87,5 +87,9 @@ describe("cue editing", () => {
     expect(activeIndex(sorted, 1200)).toBe(-1);
     expect(activeIndex(sorted, 4999)).toBe(2);
     expect(activeIndex(sorted, 5000)).toBe(-1);
+    // Overlap: the earlier caption shows until it ends, as in the exported video.
+    const overlapping = sortCues([cue("a", 0, 2000), cue("b", 1500, 3000)]);
+    expect(activeIndex(overlapping, 1700)).toBe(0);
+    expect(activeIndex(overlapping, 2100)).toBe(1);
   });
 });

@@ -250,10 +250,11 @@ fn drop_instant_duplicates(words: &[Word]) -> Vec<Word> {
 pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec<Cue> {
     let mut segments = drop_instant_duplicates(segments);
     // A decoding loop repeats the same sentence segment after segment: keep one,
-    // spanning the whole stretch.
+    // spanning the whole stretch. The same line said again later (a gap of more than a
+    // second) is real speech and stays a caption of its own.
     let key = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
     segments.dedup_by(|b, a| {
-        if !key(&a.text).is_empty() && key(&a.text) == key(&b.text) {
+        if !key(&a.text).is_empty() && key(&a.text) == key(&b.text) && b.start_ms - a.end_ms <= 1_000 {
             a.end_ms = a.end_ms.max(b.end_ms);
             true
         } else {
@@ -262,7 +263,9 @@ pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64
     });
     let mut cues = Vec::new();
     for seg in &segments {
-        let text = seg.text.trim();
+        // "(laughs) I didn't expect that (laughs)": drop the markers, keep the words.
+        let cleaned = strip_markers(seg.text.trim());
+        let text = cleaned.as_str();
         if text.is_empty() || is_noise(text) {
             continue;
         }
@@ -324,6 +327,35 @@ fn split_text(text: &str, limit: usize) -> Vec<String> {
         pieces.push(rest);
     }
     pieces
+}
+
+/// Removes sound markers at the start and end of a line ("[Music] Welcome back [Music]",
+/// "(laughs) I didn't expect that"), keeping the words. Brackets in the middle of a
+/// sentence may be real text, so they stay.
+fn strip_markers(t: &str) -> String {
+    let mut s = t.trim().trim_matches(|c| matches!(c, '♪' | '♫' | '♬')).trim();
+    loop {
+        let before = s;
+        for (open, close) in [('[', ']'), ('(', ')')] {
+            // A marker is short ("[Music]", "(soft laughter)"); a longer aside is speech.
+            let short = |inner: &str| inner.split_whitespace().count() <= 3;
+            if s.starts_with(open) {
+                if let Some(end) = s.find(close).filter(|&e| short(&s[open.len_utf8()..e])) {
+                    s = s[end + close.len_utf8()..].trim_start();
+                }
+            }
+            if s.ends_with(close) {
+                if let Some(start) = s.rfind(open).filter(|&b| short(&s[b + open.len_utf8()..s.len() - close.len_utf8()])) {
+                    s = s[..start].trim_end();
+                }
+            }
+        }
+        s = s.trim_matches(|c| matches!(c, '♪' | '♫' | '♬')).trim();
+        if s == before {
+            break;
+        }
+    }
+    s.to_string()
 }
 
 fn is_noise(t: &str) -> bool {
@@ -411,6 +443,26 @@ pub fn wrap_text(text: &str, max_line_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sound_markers_go_but_the_words_stay() {
+        assert_eq!(strip_markers("(laughs) I didn't expect that (laughs)"), "I didn't expect that");
+        assert_eq!(strip_markers("[Music] Welcome back [Music]"), "Welcome back");
+        assert_eq!(strip_markers("♪ la la ♪"), "la la");
+        assert_eq!(strip_markers("[Music]"), "");
+        assert_eq!(strip_markers("দাম (মানে আমাদের হিসাবে প্রায় তিন হাজার)"), "দাম (মানে আমাদের হিসাবে প্রায় তিন হাজার)");
+        assert_eq!(strip_markers("It costs (about) three"), "It costs (about) three");
+    }
+
+    #[test]
+    fn the_same_line_said_again_later_stays_two_captions() {
+        let w = |s: i64, e: i64, t: &str| Word { start_ms: s, end_ms: e, text: t.into(), confidence: 1.0 };
+        let looped = from_segments(&[w(0, 1_000, "Thank you."), w(1_000, 2_000, "Thank you.")], &Options::default(), None);
+        assert_eq!(looped.len(), 1);
+        let later = from_segments(&[w(10_000, 11_000, "Thank you."), w(40_000, 41_000, "Thank you.")], &Options::default(), None);
+        assert_eq!(later.len(), 2);
+        assert!(later[0].end_ms <= 12_000);
+    }
 
     fn words(spec: &[(i64, i64, &str)]) -> Vec<Word> {
         spec.iter().map(|(s, e, t)| Word { confidence: 1.0, start_ms: *s, end_ms: *e, text: format!(" {t}") }).collect()

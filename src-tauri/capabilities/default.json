@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main CaptionNest window",
+  "description": "Permissions for the main CaptionNest window. Links may open only the pages the app itself links to.",
   "windows": [
     "main"
   ],
@@ -15,9 +15,11 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        {
-          "url": "https://*"
-        }
+        { "url": "https://dashboard.sarvam.ai" },
+        { "url": "https://dashboard.sarvam.ai/*" },
+        { "url": "https://console.deepgram.com" },
+        { "url": "https://console.deepgram.com/*" },
+        { "url": "https://www.capcut.com/help/*" }
       ]
     }
   ]
