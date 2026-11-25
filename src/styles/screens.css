@@ -49,7 +49,7 @@
 
 .sample-cue--en {
   font-size: 15px;
-  color: var(--gold);
+  color: #f2bd4b;
   background: rgb(0 0 0 / 0.55);
 }
 
@@ -154,6 +154,26 @@
 .home__status {
   margin-top: auto;
   padding-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* The maker's credit: quiet, in the corner, the name set in the display face. */
+.madeby {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--dust);
+  white-space: nowrap;
+}
+
+.madeby__name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--paper-2);
 }
 
 /* ---------- setup ---------- */
@@ -252,7 +272,7 @@
 .model.is-selected {
   border-color: var(--gold-line);
   background:
-    linear-gradient(180deg, rgb(242 189 75 / 0.05), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--gold) 5%, transparent), transparent 60%),
     var(--slate);
 }
 
@@ -455,7 +475,7 @@
 
 .formrow__note--warn,
 .formrow__note--warn svg {
-  color: var(--gold);
+  color: var(--gold-text);
 }
 
 .callout__body {
@@ -635,7 +655,7 @@
 }
 
 .stage--active .stage__icon {
-  color: var(--gold);
+  color: var(--gold-text);
 }
 
 .stage--todo .stage__icon svg {
@@ -800,7 +820,7 @@
 }
 
 .engine--online {
-  border-color: rgb(124 198 188 / 0.35);
+  border-color: color-mix(in srgb, var(--teal) 35%, transparent);
   background: var(--teal-soft);
 }
 
@@ -833,7 +853,7 @@
   padding: 10px 12px;
   border-radius: var(--r-md);
   background: var(--ok-soft);
-  border: 1px solid rgb(150 207 132 / 0.3);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
   color: var(--paper);
 }
 

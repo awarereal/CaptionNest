@@ -9,6 +9,7 @@ import { useStore } from "./state/store";
 import { useVoice } from "./state/voice";
 import { useUserFonts } from "./lib/userFonts";
 import { enableAutomation } from "./lib/automation";
+import { applyTheme } from "./lib/theme";
 import { confirmDiscard, openPath } from "./lib/fileFlows";
 import { ConfirmHost } from "./components/Confirm";
 import { TopBar } from "./components/TopBar";
@@ -29,6 +30,11 @@ export default function App() {
   // Boot: load state, subscribe to backend events, then reveal the window (no blank flash).
   useEffect(() => {
     const st = useStore.getState();
+    // The theme follows the settings as soon as they change (and before the window
+    // first shows, so a light theme never flashes dark).
+    const unsubTheme = useStore.subscribe((s, prev) => {
+      if (s.settings?.theme !== prev.settings?.theme) applyTheme(s.settings?.theme);
+    });
     const unlisten = [
       events.onJobProgress(st.onJobProgress),
       events.onJobFinished(st.onJobFinished),
@@ -43,7 +49,10 @@ export default function App() {
     // Caption fonts the user added load in the background; previews redraw when ready.
     void useUserFonts.getState().load();
     void useVoice.getState().refreshStatus();
-    return () => unlisten.forEach((p) => p.then((fn) => fn()));
+    return () => {
+      unsubTheme();
+      unlisten.forEach((p) => p.then((fn) => fn()));
+    };
   }, []);
 
   // Files dropped anywhere on the window.

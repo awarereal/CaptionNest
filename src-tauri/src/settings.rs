@@ -23,6 +23,9 @@ pub struct Settings {
     /// The user's Sarvam API key (kept only in this file).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sarvam_api_key: Option<String>,
+    /// Interface theme (Settings > Appearance): "system", "tungsten", "daylight",
+    /// "midnight" or "contrast".
+    pub theme: String,
 }
 
 impl Settings {
@@ -45,6 +48,7 @@ impl Default for Settings {
             setup_complete: false,
             online_recognition: true,
             sarvam_api_key: None,
+            theme: "tungsten".into(),
         }
     }
 }

@@ -2,7 +2,7 @@
 name = "captionnest"
 version = "0.1.0"
 description = "Turn the speech in a video into editable captions and export SRT for CapCut"
-authors = ["CaptionNest contributors"]
+authors = ["Aware"]
 license = "MIT"
 edition = "2024"
 rust-version = "1.90"

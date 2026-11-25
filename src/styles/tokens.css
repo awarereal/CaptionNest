@@ -1,41 +1,17 @@
 /* CaptionNest design tokens.
-   Palette: a tungsten-lit editing booth. Warm graphite surfaces, "subtitle gold" for
-   captions and the one primary action per screen, monitor teal for time and focus. */
+
+   Themes (Settings > Appearance) set only the base colours below; everything soft or
+   see-through is mixed from them, so a theme can't forget a shade. The default,
+   Tungsten, is a tungsten-lit editing booth: warm graphite surfaces, "subtitle gold" for
+   captions and the one primary action per screen, monitor teal for time and focus.
+
+   What shows the video itself (the player, caption previews, caption colour swatches)
+   keeps fixed colours in every theme: it stands for the picture, not the interface.
+
+   A theme applies to <html data-theme="…">, and also to any element carrying the
+   attribute, which is how the theme cards in Settings preview each theme. */
 
 :root {
-  color-scheme: dark;
-
-  /* surfaces, darkest to lightest */
-  --booth: #14110e;
-  --booth-deep: #0f0d0a;
-  --slate: #1b1814;
-  --slate-2: #231f1a;
-  --slate-3: #2c2721;
-  --slate-4: #363029;
-
-  /* lines */
-  --line: #312b24;
-  --line-strong: #463e34;
-
-  /* text */
-  --paper: #f1eadc;
-  --paper-2: #c0b6a5;
-  --dust: #8d8373;
-
-  /* accents */
-  --gold: #f2bd4b;
-  --gold-hi: #f8d37c;
-  --gold-lo: #d89a2e;
-  --gold-ink: #1b1407;
-  --gold-soft: rgb(242 189 75 / 0.13);
-  --gold-line: rgb(242 189 75 / 0.38);
-  --teal: #7cc6bc;
-  --teal-soft: rgb(124 198 188 / 0.14);
-  --danger: #ec7a68;
-  --danger-soft: rgb(236 122 104 / 0.13);
-  --ok: #96cf84;
-  --ok-soft: rgb(150 207 132 / 0.13);
-
   /* type */
   --font-display: "Anek Latin Variable", "Readex Pro Variable", system-ui, sans-serif;
   --font-ui: "Readex Pro Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -59,10 +35,6 @@
   --r-lg: 14px;
   --r-xl: 20px;
 
-  /* depth */
-  --shadow-pop: 0 1px 0 rgb(255 240 210 / 0.04) inset, 0 18px 50px -12px rgb(0 0 0 / 0.65), 0 2px 8px rgb(0 0 0 / 0.35);
-  --shadow-card: 0 1px 0 rgb(255 240 210 / 0.035) inset, 0 1px 2px rgb(0 0 0 / 0.3);
-
   /* motion */
   --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
@@ -71,6 +43,221 @@
   --dur-slow: 340ms;
 
   --topbar-h: 52px;
+}
+
+/* ---------- Tungsten (default): warm dark, subtitle gold ---------- */
+
+:root,
+[data-theme="tungsten"] {
+  color-scheme: dark;
+
+  /* surfaces, darkest to lightest */
+  --booth: #14110e;
+  --booth-deep: #0f0d0a;
+  --slate: #1b1814;
+  --slate-2: #231f1a;
+  --slate-3: #2c2721;
+  --slate-4: #363029;
+  --surface-tip: #2f2a23;
+  --surface-menu: #221e19;
+  --surface-toast: #26211b;
+
+  /* lines */
+  --line: #312b24;
+  --line-strong: #463e34;
+  --line-hover: #584d40;
+
+  /* text */
+  --paper: #f1eadc;
+  --paper-2: #c0b6a5;
+  --dust: #8d8373;
+
+  /* accents */
+  --gold: #f2bd4b;
+  --gold-hi: #f8d37c;
+  --gold-lo: #d89a2e;
+  --gold-ink: #1b1407;
+  --gold-edge: rgb(120 80 10 / 0.55);
+  --gold-glint: #fde3a2;
+  --gold-text: #f2bd4b;
+  --gold-text-hi: #f8d37c;
+  --teal: #7cc6bc;
+  --danger: #ec7a68;
+  --ok: #96cf84;
+
+  /* washes */
+  --scrim: rgb(8 6 4 / 0.62);
+  --sunken: rgb(0 0 0 / 0.11);
+  --hover-wash: rgb(255 240 210 / 0.022);
+  --lane-cue: #4a4136;
+  --lane-cue-hi: #615546;
+
+  /* depth */
+  --shadow-pop: 0 1px 0 rgb(255 240 210 / 0.04) inset, 0 18px 50px -12px rgb(0 0 0 / 0.65), 0 2px 8px rgb(0 0 0 / 0.35);
+  --shadow-card: 0 1px 0 rgb(255 240 210 / 0.035) inset, 0 1px 2px rgb(0 0 0 / 0.3);
+
+  /* the logo's caption strands */
+  --logo-strand-top: #f6efdf;
+  --logo-strand-bottom: #d9cdb5;
+}
+
+/* ---------- Midnight: deep blue ink, same gold ---------- */
+
+[data-theme="midnight"] {
+  color-scheme: dark;
+
+  --booth: #0b1019;
+  --booth-deep: #070b12;
+  --slate: #101724;
+  --slate-2: #161f30;
+  --slate-3: #1d283d;
+  --slate-4: #25324a;
+  --surface-tip: #1d283d;
+  --surface-menu: #141c2c;
+  --surface-toast: #172034;
+
+  --line: #1e2a3e;
+  --line-strong: #2e3c56;
+  --line-hover: #3d4e6c;
+
+  --paper: #e8edf6;
+  --paper-2: #aab6ca;
+  --dust: #7d89a0;
+
+  --gold: #f2bd4b;
+  --gold-hi: #f8d37c;
+  --gold-lo: #d89a2e;
+  --gold-ink: #1b1407;
+  --gold-edge: rgb(120 80 10 / 0.55);
+  --gold-glint: #fde3a2;
+  --gold-text: #f4c463;
+  --gold-text-hi: #f8d37c;
+  --teal: #74d0c6;
+  --danger: #f08072;
+  --ok: #94d38a;
+
+  --scrim: rgb(3 6 12 / 0.66);
+  --sunken: rgb(0 0 0 / 0.16);
+  --hover-wash: rgb(200 220 255 / 0.03);
+  --lane-cue: #2f3e5b;
+  --lane-cue-hi: #3e5174;
+
+  --shadow-pop: 0 1px 0 rgb(200 220 255 / 0.04) inset, 0 18px 50px -12px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-card: 0 1px 0 rgb(200 220 255 / 0.035) inset, 0 1px 2px rgb(0 0 0 / 0.35);
+
+  --logo-strand-top: #eef2fa;
+  --logo-strand-bottom: #b9c5da;
+}
+
+/* ---------- Daylight: light, for bright rooms ---------- */
+
+[data-theme="daylight"] {
+  color-scheme: light;
+
+  --booth: #ebe6dd;
+  --booth-deep: #e2dcd1;
+  --slate: #f9f6f0;
+  --slate-2: #f1ece4;
+  --slate-3: #e7e0d5;
+  --slate-4: #dbd2c4;
+  --surface-tip: #fffdf9;
+  --surface-menu: #fffdf9;
+  --surface-toast: #fffdf9;
+
+  --line: #dcd4c6;
+  --line-strong: #c6bba9;
+  --line-hover: #ad9f88;
+
+  --paper: #1f1a14;
+  --paper-2: #4e4538;
+  --dust: #776b5a;
+
+  /* gold fills stay bright; gold words are darker so they can be read on paper */
+  --gold: #e6a92e;
+  --gold-hi: #efbc55;
+  --gold-lo: #c98c16;
+  --gold-ink: #241805;
+  --gold-edge: rgb(150 100 10 / 0.55);
+  --gold-glint: #f8d98e;
+  --gold-text: #8a5a00;
+  --gold-text-hi: #6c4600;
+  --teal: #1c7168;
+  --danger: #bf3f2d;
+  --ok: #2d7834;
+
+  --scrim: rgb(45 33 16 / 0.34);
+  --sunken: rgb(60 40 10 / 0.04);
+  --hover-wash: rgb(60 40 10 / 0.04);
+  --lane-cue: #cdc2b0;
+  --lane-cue-hi: #bbad96;
+
+  --shadow-pop: 0 18px 44px -14px rgb(60 40 10 / 0.3), 0 2px 8px rgb(60 40 10 / 0.12);
+  --shadow-card: 0 1px 2px rgb(60 40 10 / 0.08);
+
+  --logo-strand-top: #5b5041;
+  --logo-strand-bottom: #2e271e;
+}
+
+/* ---------- High contrast: black, white and yellow, strong edges ---------- */
+
+[data-theme="contrast"] {
+  color-scheme: dark;
+
+  --booth: #000000;
+  --booth-deep: #000000;
+  --slate: #0b0b0b;
+  --slate-2: #151515;
+  --slate-3: #222222;
+  --slate-4: #2e2e2e;
+  --surface-tip: #1c1c1c;
+  --surface-menu: #121212;
+  --surface-toast: #121212;
+
+  --line: #555555;
+  --line-strong: #858585;
+  --line-hover: #b0b0b0;
+
+  --paper: #ffffff;
+  --paper-2: #ececec;
+  --dust: #c4c4c4;
+
+  --gold: #ffd60a;
+  --gold-hi: #ffe24f;
+  --gold-lo: #e6bb00;
+  --gold-ink: #000000;
+  --gold-edge: #9a7d00;
+  --gold-glint: #fff2a8;
+  --gold-text: #ffd60a;
+  --gold-text-hi: #ffe766;
+  --teal: #62e4f5;
+  --danger: #ff7c69;
+  --ok: #7cf08a;
+
+  --scrim: rgb(0 0 0 / 0.78);
+  --sunken: rgb(255 255 255 / 0.04);
+  --hover-wash: rgb(255 255 255 / 0.06);
+  --lane-cue: #5e5e5e;
+  --lane-cue-hi: #838383;
+
+  --shadow-pop: 0 0 0 1px #6a6a6a, 0 18px 50px -12px rgb(0 0 0 / 0.8);
+  --shadow-card: 0 0 0 1px #3a3a3a;
+
+  --logo-strand-top: #ffffff;
+  --logo-strand-bottom: #dddddd;
+}
+
+/* ---------- mixed from the base colours (per theme, so previews mix their own) ---------- */
+
+:root,
+[data-theme] {
+  --gold-soft: color-mix(in srgb, var(--gold) 13%, transparent);
+  --gold-line: color-mix(in srgb, var(--gold) 38%, transparent);
+  --teal-soft: color-mix(in srgb, var(--teal) 14%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 13%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 13%, transparent);
+  --topbar-bg: color-mix(in srgb, var(--booth) 86%, transparent);
+  --veil: color-mix(in srgb, var(--booth-deep) 78%, transparent);
+  --logo-cut: var(--booth);
 }
 
 @media (prefers-reduced-motion: reduce) {

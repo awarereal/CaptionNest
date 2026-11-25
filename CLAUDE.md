@@ -215,6 +215,13 @@ and re-measure instead of guessing.
   `src/components/ui.tsx` (Radix through the `radix-ui` package, fully restyled).
   Styling is plain CSS with design tokens in `src/styles/tokens.css` (no Tailwind).
   Icons come from Phosphor only; toasts from sonner.
+- Themes (Settings > Appearance; `Settings.theme`, ids in `lib/theme.ts`): each theme sets
+  only base colours under `[data-theme="…"]`; soft and see-through shades are
+  `color-mix()`ed from them, so never write colour literals in component CSS (use
+  `var(--…)`; gold words use `--gold-text`, which is darker on Daylight). What stands for
+  the video (player, caption previews, style swatches) keeps fixed colours in every theme.
+  `src-tauri/src/theme.rs` matches the native window (light/dark chrome, launch colour).
+  Check theme work with `scripts/dev/ui_audit.py <label> <theme>`.
 - The CSP in `src-tauri/tauri.conf.json` allows only IPC for `connect-src`, and fonts are
   bundled through `@fontsource`. The web view can't reach the network, so all network
   access (model downloads, Sarvam, Deepgram) happens in Rust. API keys never reach the

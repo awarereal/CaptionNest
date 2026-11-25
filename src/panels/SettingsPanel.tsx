@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Waveform, Translate, TextAa, Cpu, HardDrives, Info, MagnifyingGlass, DownloadSimple, Trash, CheckCircle, Globe, WarningCircle, Microphone } from "@phosphor-icons/react";
+import {
+  Waveform,
+  Translate,
+  TextAa,
+  Cpu,
+  HardDrives,
+  Info,
+  MagnifyingGlass,
+  DownloadSimple,
+  Trash,
+  CheckCircle,
+  Globe,
+  WarningCircle,
+  Microphone,
+  Palette,
+} from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { useVoice } from "../state/voice";
 import { ModelCard, DownloadStatus } from "../components/ModelCard";
@@ -11,6 +26,7 @@ import type { ArgosEntry } from "../lib/types";
 import { api, toAppError } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { ONLINE_LANGUAGES, SARVAM_DASHBOARD } from "../lib/online";
+import { DEFAULT_THEME, THEMES, isThemeId, type ConcreteTheme } from "../lib/theme";
 
 const SECTIONS = [
   { id: "models", label: "Speech models", icon: Waveform },
@@ -18,6 +34,7 @@ const SECTIONS = [
   { id: "voice", label: "Voice typing", icon: Microphone },
   { id: "languages", label: "Language packs", icon: Translate },
   { id: "captions", label: "Caption layout", icon: TextAa },
+  { id: "appearance", label: "Appearance", icon: Palette },
   { id: "processing", label: "Processing", icon: Cpu },
   { id: "storage", label: "Storage", icon: HardDrives },
   { id: "about", label: "About", icon: Info },
@@ -55,6 +72,7 @@ export function SettingsPanel() {
           {active === "captions" && <CaptionsSection />}
           {active === "processing" && <ProcessingSection />}
           {active === "storage" && <StorageSection />}
+          {active === "appearance" && <AppearanceSection />}
           {active === "about" && <AboutSection />}
         </div>
       </div>
@@ -228,6 +246,78 @@ function CaptionsSection() {
       </div>
       <p className="hint">Common choices: 42 for landscape video, around 32 for vertical short-form video. Captions use at most two lines.</p>
     </>
+  );
+}
+
+function AppearanceSection() {
+  const settings = useStore((s) => s.settings);
+  const update = useStore((s) => s.updateSettings);
+  const current = isThemeId(settings?.theme) ? settings.theme : DEFAULT_THEME;
+  return (
+    <>
+      <SectionHead title="Appearance">How CaptionNest looks. Your captions don't change: their look is set with Style in the editor.</SectionHead>
+      <div className="formrow">
+        <span className="label" id="theme-label">
+          Theme
+        </span>
+        <div className="themes" role="radiogroup" aria-labelledby="theme-label">
+          {THEMES.map((t) => {
+            const on = t.id === current;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className={`themecard ${on ? "is-on" : ""}`}
+                onClick={() => void update({ theme: t.id })}
+              >
+                {t.id === "system" ? (
+                  <span className="themecard__split" aria-hidden>
+                    <ThemePreview theme="tungsten" />
+                    <ThemePreview theme="daylight" />
+                  </span>
+                ) : (
+                  <ThemePreview theme={t.id} />
+                )}
+                <span className="themecard__text">
+                  <span className="themecard__name">
+                    {t.name}
+                    {on && <CheckCircle size={16} weight="fill" className="themecard__check" />}
+                  </span>
+                  <span className="themecard__desc">{t.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** A small drawing of the editor in a theme: it takes that theme's real colours. */
+function ThemePreview({ theme }: { theme: ConcreteTheme }) {
+  return (
+    <span className="tprev" data-theme={theme} aria-hidden>
+      <span className="tprev__bar">
+        <i className="tprev__title" />
+        <i className="tprev__btn" />
+      </span>
+      <span className="tprev__body">
+        <span className="tprev__video">
+          <i className="tprev__cap" />
+        </span>
+        <span className="tprev__list">
+          <i className="tprev__time" />
+          <i className="tprev__line" />
+          <i className="tprev__time" />
+          <i className="tprev__line tprev__line--short" />
+          <i className="tprev__time" />
+          <i className="tprev__line" />
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -541,6 +631,10 @@ function AboutSection() {
           <dd className="mono">
             {info?.os} · {info?.arch}
           </dd>
+        </div>
+        <div>
+          <dt>Made by</dt>
+          <dd className="madeby__name">Aware</dd>
         </div>
       </dl>
       <p className="settings__para">

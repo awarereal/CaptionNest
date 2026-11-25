@@ -43,15 +43,15 @@
 .btn--primary {
   color: var(--gold-ink);
   background: linear-gradient(180deg, var(--gold-hi) -40%, var(--gold) 45%, var(--gold-lo) 140%);
-  border-color: rgb(120 80 10 / 0.55);
+  border-color: var(--gold-edge);
   box-shadow:
     0 1px 0 rgb(255 245 215 / 0.55) inset,
     0 -1px 0 rgb(90 55 0 / 0.25) inset,
-    0 6px 18px -8px rgb(242 189 75 / 0.55);
+    0 6px 18px -8px color-mix(in srgb, var(--gold) 55%, transparent);
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, #fde3a2 -40%, var(--gold-hi) 45%, var(--gold) 140%);
+  background: linear-gradient(180deg, var(--gold-glint) -40%, var(--gold-hi) 45%, var(--gold) 140%);
 }
 
 .btn--secondary {
@@ -63,7 +63,7 @@
 
 .btn--secondary:hover:not(:disabled) {
   background: var(--slate-3);
-  border-color: #564c3f;
+  border-color: var(--line-hover);
 }
 
 .btn--ghost {
@@ -90,11 +90,11 @@
 .btn--danger {
   color: var(--danger);
   background: var(--danger-soft);
-  border-color: rgb(236 122 104 / 0.3);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: rgb(236 122 104 / 0.2);
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
 .btn:disabled {
@@ -150,7 +150,7 @@
 }
 
 .iconbtn--active {
-  color: var(--gold);
+  color: var(--gold-text);
   background: var(--gold-soft);
 }
 
@@ -166,7 +166,7 @@
   gap: 8px;
   padding: 5px 8px;
   border-radius: var(--r-xs);
-  background: #2f2a23;
+  background: var(--surface-tip);
   border: 1px solid var(--line-strong);
   color: var(--paper);
   font-size: var(--text-sm);
@@ -212,7 +212,7 @@
 }
 
 .field:hover {
-  border-color: #5a4f41;
+  border-color: var(--line-hover);
 }
 
 .field:focus-visible,
@@ -255,7 +255,7 @@
   min-width: var(--radix-select-trigger-width, 220px);
   max-height: min(420px, var(--radix-select-content-available-height, 420px));
   overflow: hidden;
-  background: #221e19;
+  background: var(--surface-menu);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-pop);
@@ -292,7 +292,7 @@
   width: 16px;
   display: grid;
   place-items: center;
-  color: var(--gold);
+  color: var(--gold-text);
   flex: none;
 }
 
@@ -446,7 +446,7 @@
 }
 .badge--gold {
   background: var(--gold-soft);
-  color: var(--gold);
+  color: var(--gold-text);
 }
 .badge--teal {
   background: var(--teal-soft);
@@ -466,7 +466,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgb(8 6 4 / 0.62);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
   z-index: 40;
   animation: fade-in var(--dur) var(--ease-out);
@@ -546,7 +546,7 @@
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--line);
-  background: rgb(0 0 0 / 0.12);
+  background: var(--sunken);
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 
@@ -574,15 +574,15 @@
 }
 
 .callout--gold {
-  background: rgb(242 189 75 / 0.07);
-  border-color: rgb(242 189 75 / 0.22);
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+  border-color: color-mix(in srgb, var(--gold) 22%, transparent);
 }
 .callout--gold svg {
-  color: var(--gold);
+  color: var(--gold-text);
 }
 .callout--danger {
-  background: rgb(236 122 104 / 0.07);
-  border-color: rgb(236 122 104 / 0.25);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
 }
 .callout--danger svg {
   color: var(--danger);
@@ -611,7 +611,7 @@
 }
 
 .wordmark__nest {
-  color: var(--gold);
+  color: var(--gold-text);
 }
 
 /* ---------- toasts (sonner) ---------- */
@@ -623,7 +623,7 @@
   width: 360px;
   padding: 12px 14px;
   border-radius: var(--r-md);
-  background: #26211b;
+  background: var(--surface-toast);
   border: 1px solid var(--line-strong);
   color: var(--paper);
   box-shadow: var(--shadow-pop);
@@ -632,7 +632,7 @@
 }
 
 .toast [data-icon] {
-  color: var(--gold);
+  color: var(--gold-text);
   margin-top: 1px;
 }
 
