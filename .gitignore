@@ -29,6 +29,8 @@ dist-ssr
 /src-tauri/resources/bundled-models/
 /src-tauri/resources/licenses/FFMPEG_BUILD.txt
 /release/
+# Finished installers kept next to the project for sharing
+/CaptionNest installers/
 __pycache__/
 *.tsbuildinfo
 
