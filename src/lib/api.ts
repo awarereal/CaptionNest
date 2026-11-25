@@ -13,11 +13,15 @@ import type {
   ModelState,
   PlanInfo,
   Preview,
+  FontImportResult,
+  Heard,
   ProgressEvent,
   Project,
   Settings,
   Track,
+  UserFont,
   ValidationReport,
+  VoiceStatus,
 } from "./types";
 
 /** Normalizes anything thrown by `invoke` into an AppError. */
@@ -109,6 +113,24 @@ export const api = {
   loadProject: (path: string) => call<LoadedProject>("load_project", { path }),
   forgetRecent: (path: string) => call<void>("forget_recent", { path }),
   pathExists: (path: string) => call<boolean>("path_exists", { path }),
+
+  listFonts: () => call<UserFont[]>("list_fonts"),
+  importFonts: (paths: string[]) => call<FontImportResult>("import_fonts", { paths }),
+  /** The bytes of one added font file. */
+  fontFile: (file: string) => call<ArrayBuffer>("font_file", { file }),
+  removeFont: (id: string) => call<UserFont[]>("remove_font", { id }),
+
+  voiceStatus: () => call<VoiceStatus>("voice_status"),
+  saveVoiceKey: (key: string) => call<VoiceStatus>("save_voice_key", { key }),
+  removeVoiceKey: () => call<VoiceStatus>("remove_voice_key"),
+  /** Sends one microphone recording as raw bytes and returns what was said. */
+  transcribeVoice: async (audio: Uint8Array, mime: string, language: string): Promise<Heard> => {
+    try {
+      return await invoke<Heard>("transcribe_voice", audio, { headers: { "x-mime": mime, "x-language": language } });
+    } catch (e) {
+      throw toAppError(e);
+    }
+  },
 };
 
 export const events = {

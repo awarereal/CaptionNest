@@ -115,10 +115,53 @@ models automatically.
 - **Style** (under the video) sets how captions look: six ready-made looks, or choose
   the font, weight, size, color, outline, background, shadow and position yourself.
   The preview shows exactly what an exported video will look like.
+- **Your own font:** in **Style → Font**, click **Add your own font** and choose a
+  `.ttf`, `.otf`, `.woff` or `.woff2` file. Choose the Regular and Bold files together
+  to get both weights. CaptionNest keeps a copy, so you can move the original. If the
+  font has no Bangla letters, Bangla words are drawn in Anek. A project that uses
+  your font shows it on another computer once the same font is added there.
 - **Save** keeps your work as a `.captionnest` project. If you move the video later,
   CaptionNest asks you to locate it.
 - **Add language** creates a translated caption track; your original captions stay as
   they are.
+
+### Typing Bangla
+
+You don't need a Bangla keyboard. In Bangla captions, type with English letters the way
+the word sounds and it becomes Bangla as you type: `ami` → আমি, `bhalo` → ভালো,
+`jonno` → জন্য, `taka` → টাকা.
+
+- Other spellings appear under the caption while you type. Press **↓** / **↑** to pick
+  one, or click it. **Space** or any punctuation keeps the word.
+- **Esc** keeps the English letters you typed (for English words and names).
+- Words already in your captions are preferred, so a name you fix once comes up
+  right the next time.
+- Digits become Bangla digits and `.` becomes `।`.
+- It follows the Avro phonetic rules: `O` for ো, `I` for ী, `U` for ূ, `T`/`D`/`N` for
+  ট/ড/ণ, `S` for ষ, `ng` for ং, `^` for ঁ, `:` for ঃ, `rri` for ঋ, and `` ` `` to keep two
+  letters from joining.
+- Turn it off or on with **Bangla typing** above the captions, or Ctrl+B (⌘+B on Mac).
+  A system Bangla keyboard keeps working as usual.
+
+### Voice typing
+
+Click into a caption, then click the **microphone** at the right of the text box and
+speak. **Listening** shows while it records; click **Stop** when you're done (or Esc
+to cancel). **Processing** shows while your words are written down; then they appear at
+the cursor. If you selected some text first, your words replace it; everything else in
+the caption stays. Fix any word by typing, like any other text.
+
+- Voice typing uses Deepgram's online speech recognition (Nova-3), which writes Bangla in
+  Bangla letters, including English words you mix in. It works in Bangla and English
+  captions.
+- Add your Deepgram API key once in **Settings → Voice typing**. Create one at
+  console.deepgram.com.
+- The first time, macOS or Windows asks to allow the microphone. If you said no, allow
+  it in System Settings → Privacy & Security → Microphone (Windows: Settings →
+  Privacy & security → Microphone).
+- Only the recording of what you say is sent to Deepgram, and only while voice typing.
+  If the connection fails, **Send again** sends the same recording without speaking
+  again; your caption is never changed by an error.
 
 Speech recognition is very good but not perfect, especially with background music,
 several people talking at once, or strong accents. Bangla captions are a strong first

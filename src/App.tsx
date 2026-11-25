@@ -6,6 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { api, events } from "./lib/api";
 import { useStore } from "./state/store";
+import { useVoice } from "./state/voice";
+import { useUserFonts } from "./lib/userFonts";
 import { confirmDiscard, openPath } from "./lib/fileFlows";
 import { ConfirmHost } from "./components/Confirm";
 import { TopBar } from "./components/TopBar";
@@ -34,6 +36,9 @@ export default function App() {
     st.init()
       .catch((e) => setBootError(String(e?.message ?? e)))
       .finally(() => requestAnimationFrame(() => void api.showWindow()));
+    // Caption fonts the user added load in the background; previews redraw when ready.
+    void useUserFonts.getState().load();
+    void useVoice.getState().refreshStatus();
     return () => unlisten.forEach((p) => p.then((fn) => fn()));
   }, []);
 

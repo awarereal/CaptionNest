@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAPTION_FONTS, DEFAULT_STYLE, PRESETS, cssFont, matchingPreset, nearestWeight, normalizeStyle } from "./captionStyle";
+import { CAPTION_FONTS, DEFAULT_STYLE, PRESETS, cssFont, fontById, fontMissing, matchingPreset, nearestWeight, normalizeStyle, setUserFonts } from "./captionStyle";
 import { isRtlText, wrapLines } from "./renderCaption";
 
 describe("caption style", () => {
@@ -44,5 +44,24 @@ describe("caption layout", () => {
     expect(isRtlText("  مرحبًا بكم")).toBe(true);
     expect(isRtlText("12 hello")).toBe(false);
     expect(isRtlText("আমি")).toBe(false);
+  });
+});
+
+describe("added fonts", () => {
+  const mine = { id: "user-0123456789ab", name: "Kalpurush", family: '"CN User user-0123456789ab"', weights: [400, 700], note: "", user: true };
+
+  it("keeps an added font's id even before the font is loaded", () => {
+    setUserFonts([]);
+    expect(normalizeStyle({ font: mine.id }).font).toBe(mine.id);
+    expect(normalizeStyle({ font: "user-nothex" }).font).toBe(DEFAULT_STYLE.font);
+    expect(fontMissing(mine.id)).toBe(true);
+    expect(fontById(mine.id).id).toBe(CAPTION_FONTS[0].id);
+  });
+
+  it("draws with the added font once it's loaded", () => {
+    setUserFonts([mine]);
+    expect(fontMissing(mine.id)).toBe(false);
+    expect(cssFont({ ...DEFAULT_STYLE, font: mine.id, weight: 600 }, 10)).toMatch(/^700 10\.00px "CN User user-0123456789ab", "Anek Bangla/);
+    setUserFonts([]);
   });
 });

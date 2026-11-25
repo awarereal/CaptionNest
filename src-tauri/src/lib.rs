@@ -5,6 +5,7 @@ mod asr;
 mod automation;
 mod captions;
 mod error;
+mod fonts;
 mod jobs;
 mod media;
 mod models;
@@ -14,6 +15,7 @@ mod project;
 mod selftest;
 mod settings;
 mod translate;
+mod voice;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -32,6 +34,8 @@ pub struct AppState {
     jobs: Jobs,
     settings: Mutex<settings::Settings>,
     http: reqwest::Client,
+    /// The Deepgram key for voice typing (never sent to the web view).
+    voice: voice::VoiceKey,
     self_test: bool,
 }
 
@@ -199,6 +203,76 @@ async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
         return Err(AppError::new(ErrorCode::OnlineKey, "Paste your Sarvam API key first."));
     }
     asr::sarvam::check_key(&asr::sarvam::Online { key, http: state.http.clone() }).await
+}
+
+// ---------- caption fonts the user adds ----------
+
+#[tauri::command]
+fn list_fonts(state: State<AppState>) -> Vec<fonts::UserFont> {
+    fonts::list(&state.paths.fonts)
+}
+
+#[tauri::command]
+async fn import_fonts(state: State<'_, AppState>, paths: Vec<String>) -> Cmd<fonts::ImportResult> {
+    let dir = state.paths.fonts.clone();
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    tauri::async_runtime::spawn_blocking(move || fonts::import(&dir, &paths))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?
+}
+
+/// One added font file as raw bytes (the web view builds a FontFace from them).
+#[tauri::command]
+async fn font_file(state: State<'_, AppState>, file: String) -> Cmd<tauri::ipc::Response> {
+    let dir = state.paths.fonts.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || fonts::read_file(&dir, &file))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+fn remove_font(state: State<AppState>, id: String) -> Cmd<Vec<fonts::UserFont>> {
+    fonts::remove(&state.paths.fonts, &id)
+}
+
+// ---------- voice typing ----------
+
+#[tauri::command]
+fn voice_status(state: State<AppState>) -> voice::Status {
+    state.voice.status()
+}
+
+/// Checks a Deepgram key with Deepgram, then saves it.
+#[tauri::command]
+async fn save_voice_key(state: State<'_, AppState>, key: String) -> Cmd<voice::Status> {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err(AppError::new(ErrorCode::VoiceKey, "Paste your Deepgram API key first."));
+    }
+    voice::check_key(&state.http, &key).await?;
+    state.voice.set(Some(key))?;
+    Ok(state.voice.status())
+}
+
+#[tauri::command]
+fn remove_voice_key(state: State<AppState>) -> Cmd<voice::Status> {
+    state.voice.set(None)?;
+    Ok(state.voice.status())
+}
+
+/// Turns one microphone recording (raw bytes; `x-mime` and `x-language` headers) into text.
+#[tauri::command]
+async fn transcribe_voice(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Cmd<voice::Heard> {
+    let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let (mime, language) = (header("x-mime"), header("x-language"));
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::internal("the recording must be sent as bytes"));
+    };
+    let Some(key) = state.voice.get() else {
+        return Err(AppError::new(ErrorCode::VoiceKey, "Add your Deepgram API key in Settings → Voice typing to use voice typing."));
+    };
+    voice::transcribe(&state.http, &key, bytes.clone(), &mime, &language).await
 }
 
 // ---------- generation ----------
@@ -498,7 +572,9 @@ pub fn run() {
     let is_self_test = self_test.is_some();
 
     let mut builder = tauri::Builder::default();
-    if !is_self_test {
+    // A test build driven through the automation bridge runs next to an installed copy.
+    let test_instance = cfg!(feature = "automation") && std::env::var_os("CAPTIONNEST_AUTOMATION_PORT").is_some();
+    if !is_self_test && !test_instance {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
@@ -526,11 +602,13 @@ pub fn run() {
             #[cfg(feature = "automation")]
             automation::start(app.handle());
             let settings = settings::load(&paths.config);
+            let voice = voice::VoiceKey::load(&paths.config);
             app.manage(AppState {
                 paths,
                 jobs: Jobs::default(),
                 settings: Mutex::new(settings),
                 http: models::download::client(),
+                voice,
                 self_test: is_self_test,
             });
             if let Some(test) = self_test.clone() {
@@ -570,6 +648,14 @@ pub fn run() {
             forget_recent,
             path_exists,
             now_ms,
+            list_fonts,
+            import_fonts,
+            font_file,
+            remove_font,
+            voice_status,
+            save_voice_key,
+            remove_voice_key,
+            transcribe_voice,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CaptionNest");

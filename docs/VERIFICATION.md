@@ -60,6 +60,29 @@ Other measured changes: punctuated language prompts restore punctuation and capi
 lost in timestamped decoding; a chunk-sized encoder window (`-ac`) was 22% faster with
 CER 27.5% vs 28.8%; two parallel recognizer processes were ~19% faster.
 
+## Voice typing (Deepgram Nova-3, Bangla)
+
+Deepgram lists Bengali (`bn`) for Nova-3 (added January 2026, improved model March 2026).
+Checked on the same 20 FLEURS Bangla utterances, sent whole to the pre-recorded API with
+`model=nova-3&smart_format=true&punctuate=true` (2026-11-25):
+
+| Language setting | WER | CER | Bengali script | Digits | Punctuation |
+|---|---|---|---|---|---|
+| **`language=bn` (shipped)** | 5.8% | **3.3%** | 100% | Bengali (৪) | sentence marks and commas |
+| `language=multi` + hints `bn`, `en` | 4.9% | 3.5% | 100% | Latin (4) | often missing |
+
+English words spoken inside Bangla came back in Bangla letters in both modes (পাবলিক
+ওয়েবসাইটে, অ্যাসপেক্ট রেশিও). `language=bn` was kept for its lower character error rate,
+consistent punctuation and Bengali digits. The app's own request code was checked live
+with WAV, WebM/Opus and MP4/AAC recordings (`voice::tests::live_bangla_transcription`,
+ignored unless `DEEPGRAM_API_KEY` and `CAPTIONNEST_VOICE_SAMPLES` are set), and a wrong
+key is reported as `401 INVALID_AUTH` → "Deepgram didn't accept the API key".
+
+In the app (dev build, automation bridge) a recording fed in through a stand-in
+microphone went Listening → Processing → inserted at the cursor as one undo step.
+A real microphone was not exercised by automation; macOS needs `NSMicrophoneUsageDescription`
+(now in `src-tauri/Info.plist`) for the web view to offer the microphone at all.
+
 ## Caption timing
 
 Measured against the audio itself (`scripts/bench/timing_check.py`): each caption edge

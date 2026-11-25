@@ -11,6 +11,7 @@ export type RecoveryAction =
   | "set-language"
   | "free-space"
   | "open-online"
+  | "open-voice"
   | "show-details";
 
 export interface Described {
@@ -71,6 +72,14 @@ export function describeError(e: AppError): Described {
       return { title: "Sarvam key not accepted", message: m, actions: ["open-online"] };
     case "online_credits":
       return { title: "Sarvam credits used up", message: m, actions: ["open-online"] };
+    case "voice_key":
+      return { title: "Deepgram key needed", message: m, actions: ["open-voice"] };
+    case "voice_credits":
+      return { title: "Deepgram credits used up", message: m, actions: ["open-voice"] };
+    case "voice_failed":
+      return { title: "Voice typing stopped", message: m, actions: ["retry", "show-details"] };
+    case "font_invalid":
+      return { title: "Font can't be used", message: m, actions: [] };
     case "online_failed":
       return { title: "Online recognition stopped", message: m, actions: ["retry", "open-online", "show-details"] };
     default:

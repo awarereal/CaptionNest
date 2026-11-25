@@ -35,6 +35,14 @@ pub enum ErrorCode {
     OnlineCredits,
     /// Online recognition failed (service busy or an unexpected reply).
     OnlineFailed,
+    /// Voice typing: the Deepgram key is missing, refused or lacks permission.
+    VoiceKey,
+    /// Voice typing: no Deepgram credits left.
+    VoiceCredits,
+    /// Voice typing failed (service busy, unreadable recording or reply).
+    VoiceFailed,
+    /// A file added as a caption font isn't a usable font.
+    FontInvalid,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

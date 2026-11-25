@@ -18,6 +18,10 @@ caption becomes its own editable clip.
 - **A real editor.** Synced preview with caption overlay, caption lane timeline, editable
   timecodes, split / merge / add / delete, timing shift, undo/redo, projects that survive
   moved videos, overlap and validity checks before export.
+- **Bangla without a Bangla keyboard.** Type phonetically (`ami` → আমি) with spelling
+  choices learned from your own captions, or dictate with voice typing (Deepgram Nova-3,
+  optional, needs your key).
+- **Your own fonts** for the preview and burned-in video exports (.ttf, .otf, .woff, .woff2).
 - **Long videos.** Audio is processed in chunks from disk; the caption list is virtualized.
 
 | Platform | Package |
