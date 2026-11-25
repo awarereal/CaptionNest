@@ -133,12 +133,16 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
         dtw: false,
     };
     let mut uncertain = None;
+    // Whether the language is known well enough to tell online recognition which one to
+    // expect: chosen by the user, or detected confidently by the Accurate model.
+    let mut language_trusted = spoken.is_some();
     let can_detect = offline_model.is_ok() || catalog::whisper_model(DETECTION_MODEL).is_some_and(|m| models::whisper_installed(paths, m));
     if opts.language.is_none() && can_detect {
         // The Accurate model identifies languages far more reliably (on real Bangla speech
         // it was right 20 of 20 times; the Fast model 3 of 20), so it detects when present.
         let mut detect_opts = opts.clone();
-        if let Some(m) = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m)) {
+        let accurate = catalog::whisper_model(DETECTION_MODEL).filter(|m| models::whisper_installed(paths, m));
+        if let Some(m) = accurate {
             detect_opts.model = models::whisper_path(paths, m);
         }
         // Listen at up to three places (start, middle, later) and vote, so a music
@@ -149,6 +153,7 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
             if confidence < 0.5 {
                 uncertain = Some(format!("language_uncertain:{lang}:{confidence:.2}"));
             }
+            language_trusted = accurate.is_some() && confidence >= 0.5;
             opts.language = Some(lang);
         }
     }
@@ -182,9 +187,11 @@ pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, can
     let word_timing = std::env::var("CAPTIONNEST_WORD_TIMING").unwrap_or_else(|_| "sparse".into());
     let timing_opts = online.as_ref().filter(|_| word_timing != "0").and_then(|_| timing_options(paths, &opts, offline_model.as_ref().ok()));
     if let Some(online) = &online {
+        // A guess from a weaker model (the Fast model named Bangla correctly only 3 of 20
+        // times) would make Sarvam write the wrong language: let Sarvam detect it instead.
         let code = match opts.language.as_deref() {
-            Some(l) => sarvam::language_code(l),
-            None => Some("unknown"),
+            Some(l) if language_trusted => sarvam::language_code(l),
+            _ => Some("unknown"),
         };
         match code {
             Some(code) => match recognize_online(&ctx, &wav, online, code, req.duration_ms).await {
