@@ -34,6 +34,27 @@ runs it (speech chunks up to 25 s): **13.1% WER, 4.0% CER**, 3 seconds for the w
 offline model garbled them. Sarvam writes money as "₹17,000"; CaptionNest rewrites it as
 "১৭,০০০ টাকা" and uses Bengali digits in Bangla captions.
 
+**Timing of online captions.** Sarvam gives one time span per request, so captions are
+only as well timed as the audio is cut. Requests of up to 25 s that ran across pauses put
+captions seconds early or late on a travel vlog (voice over music, several speakers).
+Now every request is one stretch of speech between pauses (≤ 12 s), a caption never runs
+across a pause of 0.5 s or more, and where the voice fills only part of a chunk an
+installed offline model locates the words in it. Measured with
+`scripts/bench/cue_window_check.py` (each caption's own time window is recognized again
+on its own; the score is the share of the caption's letters heard in that window) and
+`scripts/bench/srt_truth_check.py` (known sentence times):
+
+| Video | Before | Now |
+|---|---|---|
+| Travel vlog, 4 min (music, chatter, 3+ speakers) | 0.68 | **0.83** |
+| TV news, 2.5 min (continuous speech) | 0.96 | 0.96 |
+| Read speech with known times, 5 min | — | 55 of 56 captions inside their sentence's true span (−0.3 / +0.5 s); the 56th is a scoring artifact |
+
+Text accuracy is unchanged by the finer cut (13.4% WER on the 5-minute test, with digits
+compared like-for-like). A 12-minute vlog takes 33 s. What stays hard: two voices at
+once with no pause between them (the caption covers the whole stretch), and background
+chatter that even a second listen transcribes differently.
+
 Decisions that followed:
 - The Bangla-trained models cut spelling errors by more than half, so Bangla speech is
   transcribed with them automatically when one is installed. **Bangla Max** is
@@ -97,6 +118,37 @@ Word times now come from whisper.cpp's DTW token alignment (`-dtw`, costs about 
 time on Apple-chip GPUs and 21% on CPU), and caption edges at pauses are placed on the
 speech onsets/offsets found by the Silero VAD. In CapCut the SRT lands within one video
 frame (CapCut snaps to frames).
+
+## Auto-sync captions
+
+Auto-sync moves existing captions to where their words are spoken, using only what runs
+on the computer: the voice-activity detector finds the pauses, and an offline speech
+model says which words lie between which pauses. The model's own word times are not
+used: measured against exactly timed speech they were off by 1-2 s in about 15% of
+captions, with or without attention alignment (DTW), greedy or beam search. Pauses are
+exact, so a caption that begins after a pause lands on it; a caption that begins
+mid-speech is placed by text length (good to about 0.3-0.45 s).
+
+Test: `scripts/bench/make_phrase_audio.py` builds a 4.4-minute Bangla recording of 70
+caption-sized phrases whose start and end are known exactly (gaps from 0.06 s to 1.5 s).
+The exact captions are knocked out of sync and auto-synced (`scripts/bench/resync_check.py`):
+
+| Captions were | Auto-sync found | Start error after (median / worst) | Within 0.3 s |
+|---|---|---|---|
+| all 2.5 s late | "offset", −2.5 s | 0.009 s / 0.29 s | 70 of 70 |
+| drifting, 3% slow (up to 7.9 s late) | "drift", −0.03 s → −7.9 s | 0.036 s / 0.44 s | 91% |
+| 1 in 6 moved 1.5-4 s at random | "mixed" | 0.000 s / see note | 93% |
+
+Note on the third row: two captions had been moved past their neighbours (out of
+order), which a matcher that keeps the order can't undo; both were marked for review.
+Through the real interface (`scripts/dev/sync_check.py`): whole video and section-only
+runs, preview, apply, "Check timing" marks, text and order untouched, Undo restores the
+old times; at a section's edge a synced caption never crosses an untouched one.
+
+Limits: needs an installed offline model for the captions' language; translated tracks
+can't be synced (their words aren't the spoken words); captions over loud music or
+overlapping voices are marked for review, not moved by guesswork; a 4.4-minute file
+takes about 30-40 s on an M3 Pro.
 
 ## Long video
 

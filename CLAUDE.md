@@ -52,6 +52,10 @@ Versions and SHA-256 hashes are in `scripts/tools/versions.env`. The Windows ste
 - `CAPTIONNEST_ARGOS_ROOT=<installed package dir>` enables the ignored Argos reference test:
   `cargo test --lib matches_reference -- --ignored`.
 - `SARVAM_API_KEY` (environment or the gitignored `.env`) is used by `--self-test --online` and `scripts/dev/online_check.py`.
+- `CAPTIONNEST_DEBUG_DIR=<dir>` makes the pipeline write what it heard and where it put it
+  (`online-timing.json`, `resync-heard.json`, `resync-regions.json`), for timing work.
+  Measurement-only switches: `CAPTIONNEST_WORD_TIMING=0|sparse|all`,
+  `CAPTIONNEST_JOIN_PAUSE_MS`, `CAPTIONNEST_SYNC_MODE=greedy|beam[-dtw]`, `CAPTIONNEST_NO_AC`.
 - `DEEPGRAM_API_KEY` plus `CAPTIONNEST_VOICE_SAMPLES=<a.wav,b.webm,…>` enable the ignored live voice-typing test:
   `cargo test --lib live_bangla_transcription -- --ignored --nocapture`.
 
@@ -59,7 +63,9 @@ Versions and SHA-256 hashes are in `scripts/tools/versions.env`. The Windows ste
 
 `<app binary> --self-test <media> --model <ggml.bin> --out out.srt [--language xx] [--online]`
 runs the real pipeline with the bundled tools and no window. It writes a JSON report to
-`out.json` and exits 0 on success. `scripts/ci/smoke-macos.sh` and `smoke-windows.ps1`
+`out.json` and exits 0 on success. With `--resync <captions.srt> [--from s] [--to s]` it
+auto-syncs those captions to the media instead (using the models installed under
+`CAPTIONNEST_HOME`) and writes the moved captions plus a per-caption report. `scripts/ci/smoke-macos.sh` and `smoke-windows.ps1`
 use it on installed packages.
 
 ### Driving the real UI
@@ -70,6 +76,7 @@ python3 scripts/dev/ui.py shot build/shots/home.png     # snapshot (macOS only)
 python3 scripts/dev/ui.py eval 'return document.title'  # JS in the real web view
 python3 scripts/dev/flow.py generate build/testmedia/<video>.mp4 --spoken bn --caption en --shots demo
 python3 scripts/dev/verify_suite.py                     # checks behind docs/VERIFICATION.md
+python3 scripts/dev/ui_audit.py <label>                 # every screen at 1360x860 and 900x600: layout checks + snapshots
 ```
 
 In builds with the `automation` feature (and only there), the zustand store is exposed as
@@ -104,8 +111,10 @@ Notes on automation:
 - Long work runs as jobs (`src-tauri/src/jobs.rs`). A `start_*` command returns a job id at
   once and spawns a task. Progress arrives as `job-progress` events, the result as one
   `job-finished` event (`success` / `failed` / `cancelled`). Only one job per `JobKind`
-  (`Generate`, `Preview`, `Burn`) runs at a time: starting a new one cancels the old one,
-  and an outdated job's result is discarded. Translation reuses `JobKind::Generate`.
+  (`Generate`, `Preview`, `Burn`, `Sync`) runs at a time: starting a new one cancels the old
+  one, and an outdated job's result is discarded. Translation reuses `JobKind::Generate`.
+  `Burn` and `Sync` results go to their own small stores (`state/burn.ts`, `state/sync.ts`),
+  not to the main store's `job`.
   Model downloads are tracked separately by model id and emit `download-progress`.
 - Each job gets a `ScratchDir` that is deleted when the job ends; `sweep_abandoned` cleans
   leftovers at startup.
@@ -124,15 +133,41 @@ Notes on automation:
 3. Language detection (when "auto") votes at up to three points in the speech and prefers
    the Accurate model `large-v3-q5_0` when it is installed.
 4. Recognition in speech chunks of at most 12 s through `whisper-cli` (`asr/whisper.rs`).
-   Sarvam (`asr/sarvam.rs`, chunks of up to 25 s) is used instead when a key is set and it
-   supports the spoken language. A language-specialised model (Bangla) is used automatically
-   when installed.
+   Sarvam (`asr/sarvam.rs`) is used instead when a key is set and it supports the spoken
+   language. A language-specialised model (Bangla) is used automatically when installed.
 5. Bengali script repair (`asr/script.rs`) and language prompts for punctuation (`asr/prompt.rs`).
 6. Word timings become cues (`asr/segment.rs`), with cue edges snapped to VAD speech
    onsets and offsets.
 7. Optional translation. `translate/routes.rs` picks one route: none, Whisper
    speech-to-English, or Argos text translation that keeps every cue's timing (pivoting
    through English when needed).
+
+### Caption timing (read before touching it)
+
+Three measured facts shape all timing code:
+
+- **Pauses are exact, word times are not.** The VAD's speech regions come from the sound
+  itself. whisper.cpp's word times, plain or with `-dtw`, greedy or beam, were 1-2 s off
+  in about 15% of captions against exactly timed speech
+  (`scripts/bench/make_phrase_audio.py` builds that recording; `resync_check.py` scores
+  against it). It smears words over audio it skipped and slides words back across a pause.
+- **Sarvam returns one time span per request**, not per word. So every request is one
+  stretch of speech between pauses, at most 12 s (`vad::plan_pause_chunks`), which pins its
+  text. Captions from online text never run across a pause of 0.5 s or more. Where the
+  voice fills only part of a chunk, `asr/align.rs` uses an offline pass to find where.
+- **Text is never altered by timing code.** Online words go into captions unchanged
+  (`segment::Options::keep_all_words`), with a check that no letter was lost.
+
+Auto-sync (`asr/resync.rs`, `pipeline::resync_captions`, `JobKind::Sync`) moves existing
+captions to their speech and returns new times only. It matches caption words to heard
+words in order (fuzzy; Bengali and Latin script compared by sound), uses that only to
+learn which stretch of speech each word is in, and lays the words out by length between
+pauses. Captions it can't hear are never guessed: they are placed by the layout or their
+neighbours and get `Cue.timing_check` ("Check timing" in the editor), or stay where they
+were. A caption that begins after a pause lands on it exactly; one that begins mid-speech
+is good to about 0.3-0.45 s. Re-measure with the scripts above after any change here;
+`scripts/bench/cue_window_check.py` scores any SRT against real video without ground
+truth (it costs Sarvam credits).
 
 Speech that can't be recognized is kept as an empty, flagged cue; nothing is dropped
 silently. Low-confidence words go into `Cue.check`: the editor shows them as "Check"

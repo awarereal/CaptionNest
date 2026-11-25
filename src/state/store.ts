@@ -116,12 +116,16 @@ interface Store {
   selectCue: (id: string | null) => void;
   setCueText: (id: string, text: string) => void;
   markChecked: (id: string) => void;
+  /** Clears the "check timing" mark auto-sync left on a caption. */
+  markTimingChecked: (id: string) => void;
   retimeCue: (id: string, startMs: number, endMs: number) => void;
   addCue: (atMs: number) => string | null;
   deleteCue: (id: string) => void;
   splitCue: (id: string, opts: { caret?: number; atMs?: number }) => void;
   mergeCue: (id: string) => void;
   offsetAll: (deltaMs: number) => void;
+  /** Shifts all captions, the given caption and later ones, or only that caption. */
+  offsetCues: (deltaMs: number, scope: ops.ShiftScope, cueId: string | null) => void;
   replaceCues: (cues: Cue[]) => void;
   deleteTrack: (id: string) => void;
   undo: () => void;
@@ -354,6 +358,10 @@ export const useStore = create<Store>((set, get) => {
         useBurn.getState().onProgress(e);
         return;
       }
+      if (e.kind === "sync") {
+        void import("./sync").then((m) => m.useSync.getState().onProgress(e));
+        return;
+      }
       if (e.kind === "preview") {
         const p = get().preview;
         if (p.status === "converting" && (!p.jobId || p.jobId === e.jobId)) {
@@ -371,6 +379,10 @@ export const useStore = create<Store>((set, get) => {
     onJobFinished(e) {
       if (e.kind === "burn") {
         useBurn.getState().onFinished(e);
+        return;
+      }
+      if (e.kind === "sync") {
+        void import("./sync").then((m) => m.useSync.getState().onFinished(e));
         return;
       }
       if (e.kind === "preview") {
@@ -560,7 +572,9 @@ export const useStore = create<Store>((set, get) => {
     selectCue: (id) => set({ selectedCueId: id }),
     setCueText: (id, text) => commit((c) => ops.updateCue(c, id, { text }), `text:${id}`),
     markChecked: (id) => commit((c) => ops.updateCue(c, id, { check: [] })),
-    retimeCue: (id, s, e) => commit((c) => ops.retimeCue(c, id, s, e), `time:${id}`),
+    markTimingChecked: (id) => commit((c) => ops.updateCue(c, id, { timingCheck: undefined })),
+    // Setting a time by hand is the review: the mark goes.
+    retimeCue: (id, s, e) => commit((c) => ops.updateCue(ops.retimeCue(c, id, s, e), id, { timingCheck: undefined }), `time:${id}`),
     addCue(atMs) {
       let newId: string | null = null;
       const max = get().project?.video.durationMs ?? Infinity;
@@ -576,6 +590,7 @@ export const useStore = create<Store>((set, get) => {
     splitCue: (id, opts) => commit((c) => ops.splitCue(c, id, opts)),
     mergeCue: (id) => commit((c) => ops.mergeWithNext(c, id)),
     offsetAll: (delta) => commit((c) => ops.offsetAll(c, delta)),
+    offsetCues: (delta, scope, cueId) => commit((c) => ops.offsetCues(c, delta, scope, cueId)),
     replaceCues: (cues) => commit(() => cues),
     deleteTrack(id) {
       const { history, activeTrackId } = get();

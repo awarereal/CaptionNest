@@ -93,6 +93,23 @@ export function offsetAll(cues: Cue[], deltaMs: number): Cue[] {
   });
 }
 
+/** Which captions a timing shift moves. */
+export type ShiftScope = "all" | "from" | "one";
+
+/**
+ * Shifts captions by `deltaMs`: all of them, the caption `fromId` and every later one,
+ * or only `fromId`. Other captions are left exactly as they are.
+ */
+export function offsetCues(cues: Cue[], deltaMs: number, scope: ShiftScope, fromId: string | null): Cue[] {
+  if (scope === "all") return offsetAll(cues, deltaMs);
+  const sorted = sortCues(cues);
+  const i = sorted.findIndex((c) => c.id === fromId);
+  if (i < 0) return cues;
+  const ids = new Set((scope === "one" ? [sorted[i]] : sorted.slice(i)).map((c) => c.id));
+  const moved = new Map(offsetAll(cues.filter((c) => ids.has(c.id)), deltaMs).map((c) => [c.id, c]));
+  return sortCues(cues.map((c) => moved.get(c.id) ?? c));
+}
+
 /** Uncertain words that are still in the caption (edited-away words drop out). */
 export function wordsToCheck(cue: Cue): string[] {
   return (cue.check ?? []).filter((w) => w && cue.text.includes(w));

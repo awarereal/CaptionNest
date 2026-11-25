@@ -20,6 +20,8 @@ pub enum JobKind {
     Preview,
     /// Exporting a video with captions drawn in.
     Burn,
+    /// Auto-sync: finding where existing captions are spoken.
+    Sync,
 }
 
 #[derive(Default)]

@@ -70,6 +70,18 @@ export interface BurnRequest {
   cues: { startMs: number; endMs: number; file: string }[];
 }
 
+export interface SyncRequest {
+  videoPath: string;
+  audioStreamIndex: number;
+  durationMs: number;
+  language: string;
+  cues: Cue[];
+  fromMs: number | null;
+  toMs: number | null;
+  transcribeModelId: string;
+  useGpu: boolean;
+}
+
 export const api = {
   appInfo: () => call<AppInfo>("app_info"),
   showWindow: () => call<void>("show_main_window"),
@@ -100,6 +112,7 @@ export const api = {
   /** Checks the Sarvam key, saves it in Rust and returns the settings (with a masked hint). */
   saveOnlineKey: (key: string) => call<Settings>("save_online_key", { key }),
   removeOnlineKey: () => call<Settings>("remove_online_key"),
+  startSync: (request: SyncRequest) => call<string>("start_sync", { request }),
 
   burnBegin: () => call<string>("burn_begin"),
   /** Sends one caption image as raw bytes (no JSON encoding of large arrays). */

@@ -3,6 +3,7 @@
 .app {
   height: 100%;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--topbar-h) 1fr;
   background:
     radial-gradient(1200px 500px at 50% -260px, rgb(242 189 75 / 0.05), transparent 70%),
@@ -100,6 +101,7 @@
 }
 
 .topbar__name {
+  min-width: 0;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
