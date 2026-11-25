@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "captionnest",
+  "productName": "CaptionNest",
   "version": "0.1.0",
   "identifier": "com.captionnest.desktop",
   "build": {
@@ -12,24 +12,83 @@
   "app": {
     "windows": [
       {
-        "title": "captionnest",
-        "width": 800,
-        "height": 600
+        "label": "main",
+        "title": "CaptionNest",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "visible": false,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "backgroundColor": "#14110E",
+        "dragDropEnabled": true,
+        "theme": "Dark"
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' data:",
+        "img-src": "'self' data: blob: asset: http://asset.localhost",
+        "media-src": "'self' blob: asset: http://asset.localhost",
+        "connect-src": "ipc: http://ipc.localhost"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "publisher": "CaptionNest",
+    "copyright": "© 2026 CaptionNest contributors. MIT License.",
+    "category": "Video",
+    "shortDescription": "Turn video speech into editable captions for CapCut",
+    "longDescription": "CaptionNest turns the speech in a video into accurate, editable captions on your computer and exports an SRT file for CapCut. Everything runs offline after the one-time model download.",
+    "resources": {
+      "resources/tools/*": "tools/",
+      "resources/bundled-models/*": "bundled-models/",
+      "resources/licenses/*": "licenses/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.3",
+      "signingIdentity": "-",
+      "dmg": {
+        "windowSize": {
+          "width": 640,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 190
+        },
+        "applicationFolderPosition": {
+          "x": 460,
+          "y": 190
+        }
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

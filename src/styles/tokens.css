@@ -1,0 +1,82 @@
+/* CaptionNest design tokens.
+   Palette: a tungsten-lit editing booth. Warm graphite surfaces, "subtitle gold" for
+   captions and the one primary action per screen, monitor teal for time and focus. */
+
+:root {
+  color-scheme: dark;
+
+  /* surfaces, darkest to lightest */
+  --booth: #14110e;
+  --booth-deep: #0f0d0a;
+  --slate: #1b1814;
+  --slate-2: #231f1a;
+  --slate-3: #2c2721;
+  --slate-4: #363029;
+
+  /* lines */
+  --line: #312b24;
+  --line-strong: #463e34;
+
+  /* text */
+  --paper: #f1eadc;
+  --paper-2: #c0b6a5;
+  --dust: #8d8373;
+
+  /* accents */
+  --gold: #f2bd4b;
+  --gold-hi: #f8d37c;
+  --gold-lo: #d89a2e;
+  --gold-ink: #1b1407;
+  --gold-soft: rgb(242 189 75 / 0.13);
+  --gold-line: rgb(242 189 75 / 0.38);
+  --teal: #7cc6bc;
+  --teal-soft: rgb(124 198 188 / 0.14);
+  --danger: #ec7a68;
+  --danger-soft: rgb(236 122 104 / 0.13);
+  --ok: #96cf84;
+  --ok-soft: rgb(150 207 132 / 0.13);
+
+  /* type */
+  --font-display: "Anek Latin Variable", "Readex Pro Variable", system-ui, sans-serif;
+  --font-ui: "Readex Pro Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* caption text: script-specific faces first, so each language renders natively */
+  --font-caption: "Anek Latin Variable", "Anek Bangla Variable", "Anek Devanagari Variable", "Readex Pro Variable",
+    system-ui, sans-serif;
+
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-md: 13.5px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --text-3xl: 40px;
+
+  /* shape */
+  --r-xs: 5px;
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  /* depth */
+  --shadow-pop: 0 1px 0 rgb(255 240 210 / 0.04) inset, 0 18px 50px -12px rgb(0 0 0 / 0.65), 0 2px 8px rgb(0 0 0 / 0.35);
+  --shadow-card: 0 1px 0 rgb(255 240 210 / 0.035) inset, 0 1px 2px rgb(0 0 0 / 0.3);
+
+  /* motion */
+  --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 340ms;
+
+  --topbar-h: 52px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}

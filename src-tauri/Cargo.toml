@@ -1,16 +1,14 @@
 [package]
 name = "captionnest"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Turn the speech in a video into editable captions and export SRT for CapCut"
+authors = ["CaptionNest contributors"]
+license = "MIT"
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.90"
 
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+# The `_lib` suffix keeps the library name distinct from the binary (see cargo#8519 on Windows).
 name = "captionnest_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -18,16 +16,52 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-log = "2.10.2"
+tauri-plugin-window-state = "2.5.0"
+tauri-plugin-single-instance = "2.5.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2.0.21"
+anyhow = "1"
+log = "0.4.35"
+hex = "0.4.3"
+sha2 = "0.11.1"
+tempfile = "3.27.0"
+fs4 = "1.1.0"
+unicode-segmentation = "1.13.3"
+futures-util = "0.3.34"
+tokio-util = "0.7.20"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process", "io-util", "fs", "sync", "time"] }
+uuid = { version = "1.29.3", features = ["v4"] }
+zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
+# OS TLS stack (SChannel / Security.framework) and OS proxy settings for model downloads.
+reqwest = { version = "0.13", default-features = false, features = ["stream", "native-tls", "http2", "system-proxy", "multipart"] }
+# Offline machine translation (runs Argos Translate models without Python).
+ct2rs = { version = "0.11.3", default-features = false, features = ["ruy"] }
+sentencepiece = { version = "0.14.0", features = ["static"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+ct2rs = { version = "0.11.3", default-features = false, features = ["ruy", "accelerate"] }
+# Only for the test-automation feature (web view snapshots).
+objc2-web-kit = { version = "0.3.2", optional = true, features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"] }
+objc2-app-kit = { version = "0.3.2", optional = true, features = ["NSImage", "NSBitmapImageRep", "NSImageRep"] }
+objc2-foundation = { version = "0.3.2", optional = true, features = ["NSData", "NSDictionary", "NSError"] }
+block2 = { version = "0.6.2", optional = true }
 
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[features]
+# Test-only bridge that lets scripts drive the UI and take snapshots. Never enabled in releases.
+automation = ["dep:objc2-web-kit", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:block2"]
+
+[dev-dependencies]
+httpmock = "0.9.0"
+
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Unwind (not abort) so a panic inside a background job is reported instead of closing the app.
+panic = "unwind"
 strip = true
