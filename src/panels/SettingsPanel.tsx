@@ -10,7 +10,7 @@ import { recommendedBanglaId, recommendedModelId, sortModels } from "../lib/mode
 import type { ArgosEntry } from "../lib/types";
 import { api, toAppError } from "../lib/api";
 import { describeError } from "../lib/errors";
-import { ONLINE_LANGUAGES, SARVAM_DASHBOARD, maskKey } from "../lib/online";
+import { ONLINE_LANGUAGES, SARVAM_DASHBOARD } from "../lib/online";
 
 const SECTIONS = [
   { id: "models", label: "Speech models", icon: Waveform },
@@ -249,7 +249,7 @@ function wrapPreview(text: string, max: number): string[] {
 function OnlineSection() {
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
-  const saved = settings?.sarvamApiKey?.trim() ?? "";
+  const saved = settings?.sarvamKeyHint ?? "";
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<{ kind: "idle" | "checking" | "saved" | "error"; message?: string }>({ kind: "idle" });
 
@@ -258,8 +258,7 @@ function OnlineSection() {
     if (!key) return;
     setStatus({ kind: "checking" });
     try {
-      await api.checkOnlineKey(key);
-      await update({ sarvamApiKey: key, onlineRecognition: true });
+      useStore.setState({ settings: await api.saveOnlineKey(key) });
       setDraft("");
       setStatus({ kind: "saved" });
     } catch (e) {
@@ -278,7 +277,7 @@ function OnlineSection() {
         <div className="onlinekey">
           <CheckCircle size={18} weight="fill" />
           <span>
-            Key saved <span className="mono onlinekey__mask">{maskKey(saved)}</span>
+            Key saved <span className="mono onlinekey__mask">{saved}</span>
           </span>
           <span className="spacer" />
           <Button
@@ -287,7 +286,10 @@ function OnlineSection() {
             icon={<Trash size={15} />}
             onClick={() => {
               setStatus({ kind: "idle" });
-              void update({ sarvamApiKey: null });
+              void api
+                .removeOnlineKey()
+                .then((s) => useStore.setState({ settings: s }))
+                .catch((e) => setStatus({ kind: "error", message: describeError(toAppError(e)).message }));
             }}
           >
             Remove key

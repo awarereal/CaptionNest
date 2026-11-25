@@ -97,6 +97,9 @@ export const api = {
   importSrt: (path: string) => call<Cue[]>("import_srt", { path }),
 
   checkOnlineKey: (key: string) => call<void>("check_online_key", { key }),
+  /** Checks the Sarvam key, saves it in Rust and returns the settings (with a masked hint). */
+  saveOnlineKey: (key: string) => call<Settings>("save_online_key", { key }),
+  removeOnlineKey: () => call<Settings>("remove_online_key"),
 
   burnBegin: () => call<string>("burn_begin"),
   /** Sends one caption image as raw bytes (no JSON encoding of large arrays). */

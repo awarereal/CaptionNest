@@ -4,6 +4,6 @@ CaptionNest turns the speech in a video into editable captions on your computer 
 
 **Signing:** these builds are not code-signed or notarized. Windows SmartScreen shows *More info → Run anyway*; on macOS use System Settings → Privacy & Security → *Open Anyway* once.
 
-**Offline and free:** speech models (and optional translation packs) download once on first use from Hugging Face and argos-net.com; after that everything runs offline. No account, API key or subscription.
+**Offline and free:** speech models (and optional translation packs) download once on first use from Hugging Face and argos-net.com; after that captions are made offline. No account, API key or subscription is needed. Optional online services use your own keys: Sarvam for online recognition, Deepgram for voice typing.
 
 **Licenses:** CaptionNest is MIT-licensed. It bundles FFmpeg 9.0.2 under the LGPL v2.1+ — the exact source is attached (`ffmpeg-9.0.2.tar.xz`) — plus whisper.cpp (MIT) and other components listed in `THIRD_PARTY_NOTICES.md`. `SHA256SUMS.txt` lists checksums for every file.

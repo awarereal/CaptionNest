@@ -5,6 +5,7 @@ import { ask } from "../components/Confirm";
 import { useStore } from "../state/store";
 import { toAppError } from "./api";
 import { describeError } from "./errors";
+import { automationEnabled } from "./automation";
 
 export const VIDEO_EXTENSIONS = [
   "mp4", "mov", "m4v", "mkv", "webm", "avi", "mts", "m2ts", "ts", "3gp", "flv", "wmv", "mpg", "mpeg",
@@ -17,6 +18,7 @@ export const PROJECT_EXTENSION = "captionnest";
  * dialogs, which web automation can't click. Unused in normal operation.
  */
 function automationPath(): string | null | undefined {
+  if (!automationEnabled()) return undefined;
   const q = (window as unknown as { __CN_AUTOMATION__?: { paths: string[] } }).__CN_AUTOMATION__;
   return q && q.paths.length > 0 ? q.paths.shift() : undefined;
 }

@@ -72,7 +72,10 @@ python3 scripts/dev/flow.py generate build/testmedia/<video>.mp4 --spoken bn --c
 python3 scripts/dev/verify_suite.py                     # checks behind docs/VERIFICATION.md
 ```
 
-The zustand store is exposed as `window.__CN_STORE__` for these scripts.
+In builds with the `automation` feature (and only there), the zustand store is exposed as
+`window.__CN_STORE__` and `window.__CN_AUTOMATION__` stands in for file dialogs. The
+bridge refuses requests that carry browser headers (Origin, Referer, Sec-Fetch-*) or a
+non-loopback Host, so a web page can't drive the app.
 `scripts/dev/make-test-media.sh` and `make_long_video.py` create test videos with known
 speech. The automation feature never ships in release builds.
 
@@ -179,7 +182,10 @@ and re-measure instead of guessing.
   Icons come from Phosphor only; toasts from sonner.
 - The CSP in `src-tauri/tauri.conf.json` allows only IPC for `connect-src`, and fonts are
   bundled through `@fontsource`. The web view can't reach the network, so all network
-  access (model downloads, Sarvam, Deepgram) happens in Rust. New plugin APIs also need a permission
+  access (model downloads, Sarvam, Deepgram) happens in Rust. API keys never reach the
+  web view: `get_settings` returns a masked `sarvamKeyHint`, and keys change only through
+  `save_online_key` / `remove_online_key` and `save_voice_key` / `remove_voice_key`.
+  `opener:allow-open-url` lists the exact sites the app links to. New plugin APIs also need a permission
   in `src-tauri/capabilities/default.json`.
 - The caption list (`components/CueList.tsx`) is virtualized with @tanstack/react-virtual.
   Rows stack in normal flow inside one block shifted by the first item's start, so a

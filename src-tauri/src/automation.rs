@@ -44,6 +44,9 @@ pub fn start(app: &AppHandle) {
     });
 }
 
+/// Largest request body (a test script or a path); bigger ones are refused.
+const MAX_BODY: usize = 1024 * 1024;
+
 fn handle(app: &AppHandle, pending: &Pending, mut stream: TcpStream) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
@@ -51,15 +54,32 @@ fn handle(app: &AppHandle, pending: &Pending, mut stream: TcpStream) -> std::io:
     let mut parts = request_line.split_whitespace();
     let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
     let mut len = 0usize;
+    let mut from_browser = false;
+    let mut host_ok = false;
     loop {
         let mut h = String::new();
         reader.read_line(&mut h)?;
         if h == "\r\n" || h.is_empty() {
             break;
         }
-        if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+        let lower = h.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
             len = v.trim().parse().unwrap_or(0);
         }
+        // Browsers always send Origin (or Sec-Fetch-*) with cross-site requests; the test
+        // scripts never do. A web page must not be able to drive the app.
+        if lower.starts_with("origin:") || lower.starts_with("sec-fetch-") || lower.starts_with("referer:") {
+            from_browser = true;
+        }
+        // DNS rebinding: only a loopback Host is accepted.
+        if let Some(v) = lower.strip_prefix("host:") {
+            let host = v.trim().rsplit_once(':').map(|(h, _)| h).unwrap_or(v.trim());
+            host_ok = matches!(host, "127.0.0.1" | "localhost" | "[::1]");
+        }
+    }
+    if from_browser || !host_ok || len > MAX_BODY {
+        let _ = write!(stream, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return Ok(());
     }
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body)?;

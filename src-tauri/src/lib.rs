@@ -52,6 +52,8 @@ struct AppInfo {
     gpu_backend: Option<&'static str>,
     models_dir: String,
     log_dir: Option<String>,
+    /// A test build with the automation bridge (turns on the UI's test hooks).
+    automation: bool,
 }
 
 #[tauri::command]
@@ -70,6 +72,7 @@ fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
         gpu_backend,
         models_dir: state.paths.models.to_string_lossy().into_owned(),
         log_dir: app.path().app_log_dir().ok().map(|p| p.to_string_lossy().into_owned()),
+        automation: cfg!(feature = "automation"),
     }
 }
 
@@ -85,9 +88,55 @@ fn show_main_window(app: AppHandle, state: State<AppState>) {
     }
 }
 
+/// Settings as the interface sees them: the Sarvam key itself stays in Rust; the
+/// interface gets a masked hint to show that one is saved.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UiSettings {
+    #[serde(flatten)]
+    settings: settings::Settings,
+    sarvam_key_hint: Option<String>,
+}
+
+fn ui_settings(s: &settings::Settings) -> UiSettings {
+    let hint = s.sarvam_api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()).map(voice::mask);
+    UiSettings { settings: settings::Settings { sarvam_api_key: None, ..s.clone() }, sarvam_key_hint: hint }
+}
+
 #[tauri::command]
-fn get_settings(state: State<AppState>) -> settings::Settings {
-    state.settings.lock().unwrap().clone()
+fn get_settings(state: State<AppState>) -> UiSettings {
+    ui_settings(&state.settings.lock().unwrap())
+}
+
+/// Checks a Sarvam key with Sarvam, then saves it and turns online recognition on.
+#[tauri::command]
+async fn save_online_key(app: AppHandle, key: String) -> Cmd<UiSettings> {
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err(AppError::new(ErrorCode::OnlineKey, "Paste your Sarvam API key first."));
+    }
+    let http = app.state::<AppState>().http.clone();
+    asr::sarvam::check_key(&asr::sarvam::Online { key: key.clone(), http }).await?;
+    off_main(&app, move |state| {
+        let mut s = state.settings.lock().unwrap();
+        let next = settings::Settings { sarvam_api_key: Some(key), online_recognition: true, ..s.clone() };
+        settings::save(&state.paths.config, &next)?;
+        *s = next;
+        Ok(ui_settings(&s))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_online_key(app: AppHandle) -> Cmd<UiSettings> {
+    off_main(&app, |state| {
+        let mut s = state.settings.lock().unwrap();
+        let next = settings::Settings { sarvam_api_key: None, ..s.clone() };
+        settings::save(&state.paths.config, &next)?;
+        *s = next;
+        Ok(ui_settings(&s))
+    })
+    .await
 }
 
 /// Runs file work on a worker thread. Plain (non-async) commands run on the main thread,
@@ -105,8 +154,11 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> 
         let mut current = state.settings.lock().unwrap();
         let mut settings = settings;
         // The recent-projects list is kept here, not in the interface: a copy sent from
-        // the interface may be older than a project that was just opened.
+        // the interface may be older than a project that was just opened. The Sarvam key
+        // never goes to the interface, so it's kept too (it changes only through
+        // save_online_key / remove_online_key).
         settings.recent_projects = current.recent_projects.clone();
+        settings.sarvam_api_key = current.sarvam_api_key.clone();
         settings::save(&state.paths.config, &settings)?;
         *current = settings;
         Ok(())
@@ -118,6 +170,15 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> 
 
 /// Lets the web view play a local file through the asset protocol.
 fn allow_media(app: &AppHandle, path: &Path) {
+    // Only audio and video files: a project file can name any path as "its video".
+    const MEDIA: [&str; 21] = [
+        "mp4", "mov", "m4v", "mkv", "webm", "avi", "mts", "m2ts", "ts", "3gp", "flv", "wmv", "mpg", "mpeg", "mp3", "m4a", "wav", "aac", "flac", "ogg", "opus",
+    ];
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !MEDIA.contains(&ext.as_str()) {
+        log::warn!("not granting preview access to a non-media file");
+        return;
+    }
     if let Err(e) = app.asset_protocol_scope().allow_file(path) {
         log::warn!("asset scope: {e}");
     }
@@ -193,8 +254,12 @@ async fn burn_frame(app: AppHandle, request: tauri::ipc::Request<'_>) -> Cmd<()>
 
 #[tauri::command]
 async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::burn::BurnRequest) -> Cmd<String> {
-    if uuid::Uuid::parse_str(&request.frames_id).is_err() || !media::burn::valid_frame_name(&request.blank) {
-        return Err(AppError::internal("invalid caption image folder"));
+    if uuid::Uuid::parse_str(&request.frames_id).is_err()
+        || !media::burn::valid_frame_name(&request.blank)
+        || !request.cues.iter().all(|c| media::burn::valid_frame_name(&c.file))
+    {
+        // Every image must be one of this export's own files (FFmpeg reads them by name).
+        return Err(AppError::internal("invalid caption image name"));
     }
     let (job_id, cancel) = state.jobs.begin(JobKind::Burn);
     let id = job_id.clone();
@@ -681,6 +746,8 @@ pub fn run() {
             show_main_window,
             get_settings,
             save_settings,
+            save_online_key,
+            remove_online_key,
             probe_media,
             start_preview,
             start_generate,

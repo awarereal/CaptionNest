@@ -36,8 +36,9 @@ pub struct GenerateRequest {
     /// Use a language-specialised model (e.g. Bangla) when one is installed. Default on.
     #[serde(default)]
     pub use_language_models: Option<bool>,
-    /// Testing only: use this model file instead of a catalog model.
-    #[serde(default)]
+    /// Testing only (set by the self-test, never accepted from the interface): use this
+    /// model file instead of a catalog model.
+    #[serde(skip)]
     pub model_path_override: Option<String>,
     /// Online recognition (filled in from Settings by the app, never sent by the UI).
     #[serde(skip)]

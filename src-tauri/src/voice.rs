@@ -116,7 +116,7 @@ impl VoiceKey {
 }
 
 /// "a1b2c…9f0e": enough to recognize a key without showing it.
-fn mask(key: &str) -> String {
+pub(crate) fn mask(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
     if chars.len() <= 10 {
         return "••••".into();

@@ -219,7 +219,8 @@ export interface Settings {
   setupComplete: boolean;
   /** Use Sarvam online recognition when a key is set. */
   onlineRecognition: boolean;
-  sarvamApiKey?: string | null;
+  /** "sk_ab…9lnQ" when a Sarvam key is saved (the key itself stays in Rust). */
+  sarvamKeyHint?: string | null;
 }
 
 export interface RecentProject {
@@ -236,6 +237,8 @@ export interface AppInfo {
   gpuBackend: string | null;
   modelsDir: string;
   logDir: string | null;
+  /** Test build with the automation bridge. */
+  automation: boolean;
 }
 
 export type IssueKind = "empty_text" | "negative_time" | "invalid_duration" | "out_of_order" | "overlap";

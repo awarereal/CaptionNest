@@ -34,3 +34,8 @@ __pycache__/
 
 # Local secrets (API keys)
 .env
+.env.*
+!.env.example
+# App data folders created with CAPTIONNEST_HOME inside the repo hold API keys
+**/config/settings.json
+**/config/voice.json

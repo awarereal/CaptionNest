@@ -50,7 +50,7 @@
     "copyright": "© 2026 CaptionNest contributors. MIT License.",
     "category": "Video",
     "shortDescription": "Turn video speech into editable captions for CapCut",
-    "longDescription": "CaptionNest turns the speech in a video into accurate, editable captions on your computer and exports an SRT file for CapCut. Everything runs offline after the one-time model download.",
+    "longDescription": "CaptionNest turns the speech in a video into accurate, editable captions on your computer and exports an SRT file for CapCut. Captions are made offline after the one-time model download; optional online recognition (Sarvam) and voice typing (Deepgram) use your own API keys.",
     "resources": {
       "resources/tools/*": "tools/",
       "resources/bundled-models/*": "bundled-models/",
