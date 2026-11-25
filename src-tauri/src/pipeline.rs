@@ -80,7 +80,7 @@ struct Ctx<'a> {
     speech: vad::Segments,
 }
 
-pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
+pub async fn generate(paths: &Paths, mut req: GenerateRequest, job_id: &str, cancel: &CancellationToken, report: &Reporter) -> AppResult<GenerateResult> {
     report.stage("preparing", None, None);
     let video = PathBuf::from(&req.video_path);
     if !video.is_file() {
@@ -111,6 +111,10 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let ctx = Ctx { paths, cancel, report, scratch: &scratch, seg, speech: Vec::new() };
 
     let wav = extract_wav(&ctx, &video, req.audio_stream_index, req.duration_ms).await?;
+    if req.duration_ms <= 0 {
+        // Some files (e.g. browser recordings) don't state their length; the audio does.
+        req.duration_ms = crate::media::wav::read_info(&wav).map(|i| i.duration_ms()).unwrap_or(0);
+    }
 
     report.stage("transcribing", None, Some("listening".into()));
     let speech = find_speech(&ctx, &wav).await?;
@@ -232,11 +236,21 @@ pub async fn generate(paths: &Paths, req: GenerateRequest, job_id: &str, cancel:
     let mut tracks = vec![original.clone()];
     let target = req.caption_language.as_str();
     if target != "same" && target != language {
-        let (extra, used_gpu) = translate_track(&ctx, &wav, &original, target, &req.transcribe_model_id, req.translate_model_id.as_deref(), req.use_gpu, req.duration_ms).await?;
-        if req.use_gpu && !used_gpu && !warnings.contains(&"gpu_fallback".to_string()) {
-            warnings.push("gpu_fallback".to_string());
+        match translate_track(&ctx, &wav, &original, target, &req.transcribe_model_id, req.translate_model_id.as_deref(), req.use_gpu, req.duration_ms).await {
+            Ok((extra, used_gpu)) => {
+                if req.use_gpu && !used_gpu && !warnings.contains(&"gpu_fallback".to_string()) {
+                    warnings.push("gpu_fallback".to_string());
+                }
+                tracks.extend(extra);
+            }
+            Err(e) if e.is_cancelled() => return Err(e),
+            // The captions in the spoken language are finished work: keep them and say
+            // what went wrong with the translation, instead of failing the whole job.
+            Err(e) => {
+                log::warn!("translation after recognition failed: {e:?}");
+                warnings.push(format!("translation_failed:{target}:{}", e.message));
+            }
         }
-        tracks.extend(extra);
     }
     report.stage("finishing", None, None);
     let active_track_id = tracks.last().map(|t| t.id.clone()).unwrap_or_default();
@@ -332,11 +346,14 @@ async fn recognize(ctx: &Ctx<'_>, wav: &Path, opts: &whisper::Options, duration_
         // A different decoding context: no initial prompt.
         let mut retry_opts = opts.clone();
         retry_opts.prompt = None;
-        if let Ok(t2) = whisper::transcribe_spans(&cli, wav, &retry, &dir, &retry_opts, ctx.cancel, |p| {
+        let rechecked = whisper::transcribe_spans(&cli, wav, &retry, &dir, &retry_opts, ctx.cancel, |p| {
             ctx.report.stage(stage, Some(weight + p * (1.0 - weight)), detail.clone())
         })
-        .await
-        {
+        .await;
+        if ctx.cancel.is_cancelled() {
+            return Err(AppError::cancelled());
+        }
+        if let Ok(t2) = rechecked {
             let extra = vad::keep_speech(t2.words, &gaps, 300);
             t.used_gpu &= t2.used_gpu;
             t.repaired_text |= t2.repaired_text;

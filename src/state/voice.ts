@@ -311,3 +311,16 @@ export const useVoice = create<VoiceState>((set, get) => {
     },
   };
 });
+
+// A recording belongs to one caption on screen. Leaving it (another project, another
+// track, the Style panel, another screen) cancels the recording, so the microphone is
+// never left on without a visible Stop button.
+useStore.subscribe((now, before) => {
+  const leaving =
+    now.project?.id !== before.project?.id ||
+    now.activeTrackId !== before.activeTrackId ||
+    now.view !== before.view ||
+    (now.styleOpen && !before.styleOpen);
+  const { phase } = useVoice.getState();
+  if (leaving && (phase === "listening" || phase === "processing")) useVoice.getState().cancel();
+});

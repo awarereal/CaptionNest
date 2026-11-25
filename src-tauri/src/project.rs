@@ -120,12 +120,23 @@ pub fn save(path: &Path, project: &Project) -> AppResult<()> {
 }
 
 /// Moves a finished temporary file into place, retrying if Windows briefly locks it.
+///
+/// Only a rename is ever used: copying over the old file instead could leave it half
+/// written after a crash. If another app keeps the file locked, the save fails with a
+/// clear message and the old file stays intact.
 pub fn persist(tmp: tempfile::NamedTempFile, path: &Path) -> AppResult<()> {
     let tmp_path = tmp.into_temp_path();
-    crate::paths::retry_io(|| std::fs::rename(&tmp_path, path).or_else(|e| {
-        // Some Windows setups refuse rename-over-existing while a reader holds the target.
-        if path.exists() && cfg!(windows) { std::fs::copy(&tmp_path, path).map(|_| ()) } else { Err(e) }
-    }))?;
+    crate::paths::retry_io(|| std::fs::rename(&tmp_path, path)).map_err(|e| {
+        if crate::paths::is_transient_lock(&e) {
+            AppError::new(
+                ErrorCode::Io,
+                "This file is open in another app (for example CapCut or a cloud-sync app), so it couldn't be replaced. Close it there, then save again.",
+            )
+            .with_detail(e.to_string())
+        } else {
+            e.into()
+        }
+    })?;
     let _ = tmp_path.close();
     Ok(())
 }

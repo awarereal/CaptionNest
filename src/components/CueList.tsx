@@ -37,6 +37,8 @@ export function CueList({ cues, language }: { cues: Cue[]; language: string }) {
   useEffect(() => {
     if (!playing || activeIdx < 0) return;
     if (Date.now() - lastUserScroll.current < 3000) return;
+    // Editing a caption (or its times): leave the list where it is.
+    if (parentRef.current?.contains(document.activeElement)) return;
     virtualizer.scrollToIndex(activeIdx, { align: "center", behavior: "smooth" });
   }, [activeIdx, playing, virtualizer]);
 

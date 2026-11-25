@@ -153,7 +153,7 @@ pub fn retry_io<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Resul
     }
 }
 
-fn is_transient_lock(e: &std::io::Error) -> bool {
+pub fn is_transient_lock(e: &std::io::Error) -> bool {
     // ERROR_ACCESS_DENIED (5), ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33)
     cfg!(windows) && (e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33)))
 }

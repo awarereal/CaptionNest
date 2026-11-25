@@ -480,7 +480,10 @@ export const useStore = create<Store>((set, get) => {
       if (!project) return;
       const next: Project = { ...project, tracks: history.present, activeTrackId, style, updatedAtMs: Date.now() };
       await api.saveProject(path, next);
-      set({ project: next, projectPath: path, dirty: false });
+      // Edits made while the file was being written are not in it: keep them marked unsaved.
+      const after = get();
+      const unchanged = after.history.present === next.tracks && after.style === style;
+      set({ project: next, projectPath: path, dirty: !unchanged });
       const s = get().settings;
       if (s) set({ settings: { ...s, recentProjects: (await api.getSettings()).recentProjects } });
     },

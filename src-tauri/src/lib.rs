@@ -122,7 +122,7 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Preview);
-        let result = async {
+        let result = jobs::guard(async {
             report.stage("converting", Some(0.0), None);
             let info = pipeline::probe(&state.paths, Path::new(&path)).await?;
             let out = media::preview::cache_path(&state.paths.previews, &info, audio_stream_index);
@@ -132,7 +132,7 @@ async fn start_preview(app: AppHandle, state: State<'_, AppState>, path: String,
             .await?;
             allow_media(&handle, Path::new(&preview.path));
             Ok::<_, AppError>(preview)
-        }
+        })
         .await;
         jobs::finish(&handle, &state.jobs, JobKind::Preview, &id, result);
     });
@@ -183,12 +183,12 @@ async fn start_burn(app: AppHandle, state: State<'_, AppState>, request: media::
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Burn);
         // The images are removed when the export ends, however it ends.
         let frames = jobs::ScratchDir::create(&state.paths.jobs, &format!("burn-{}", request.frames_id));
-        let result = async {
+        let result = jobs::guard(async {
             let frames = frames?;
             report.stage("rendering", Some(0.0), None);
             let info = pipeline::probe(&state.paths, Path::new(&request.video_path)).await?;
             media::burn::burn(&state.paths.tool("ffmpeg")?, &info, &request, frames.path(), &cancel, |p| report.stage("rendering", Some(p), None)).await
-        }
+        })
         .await;
         jobs::finish(&handle, &state.jobs, JobKind::Burn, &id, result);
     });
@@ -288,7 +288,7 @@ async fn start_generate(app: AppHandle, state: State<'_, AppState>, request: pip
         let mut request = request;
         let key = state.settings.lock().unwrap().online_key();
         request.online = key.map(|key| asr::sarvam::Online { key, http: state.http.clone() });
-        let result = pipeline::generate(&state.paths, request, &id, &cancel, &report).await;
+        let result = jobs::guard(pipeline::generate(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });
     Ok(job_id)
@@ -302,7 +302,7 @@ async fn start_translate(app: AppHandle, state: State<'_, AppState>, request: pi
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Generate);
-        let result = pipeline::translate_existing(&state.paths, request, &id, &cancel, &report).await;
+        let result = jobs::guard(pipeline::translate_existing(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Generate, &id, result);
     });
     Ok(job_id)
@@ -407,7 +407,7 @@ async fn download_model(app: AppHandle, state: State<'_, AppState>, id: String) 
         let emit = |s: &'static str, received: u64, total: u64, bps: f64, error: Option<AppError>| {
             let _ = handle.emit("download-progress", DownloadEvent { id: id.clone(), state: s, received, total, bytes_per_sec: bps, error });
         };
-        let result = install(&state, &id, &cancel, &emit).await;
+        let result = jobs::guard(install(&state, &id, &cancel, &emit)).await;
         state.jobs.end_download(&id);
         match result {
             Ok(total) => emit("done", total, total, 0.0, None),
@@ -570,6 +570,12 @@ fn now_ms() -> i64 {
 pub fn run() {
     let self_test = selftest::SelfTest::from_args();
     let is_self_test = self_test.is_some();
+    // Release builds have no console: put panics in the log file as well.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic: {info}");
+        default_hook(info);
+    }));
 
     let mut builder = tauri::Builder::default();
     // A test build driven through the automation bridge runs next to an installed copy.
@@ -614,7 +620,8 @@ pub fn run() {
             if let Some(test) = self_test.clone() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let code = selftest::run(&handle, test).await;
+                    // A crash still ends the process with a failure code instead of hanging CI.
+                    let code = jobs::guard(async { Ok::<_, AppError>(selftest::run(&handle, test).await) }).await.unwrap_or(3);
                     handle.exit(code);
                 });
             }

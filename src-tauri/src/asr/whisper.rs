@@ -78,6 +78,10 @@ pub async fn transcribe_spans(
     if !opts.model.is_file() {
         return Err(AppError::new(ErrorCode::ModelMissing, "The speech recognition model isn't installed yet."));
     }
+    if spans.is_empty() {
+        // Nothing to listen to (the work below would divide by zero groups).
+        return Ok(Transcript { words: Vec::new(), language: opts.language.clone(), used_gpu: opts.use_gpu, repaired_text: false });
+    }
     std::fs::create_dir_all(work_dir)?;
     let info = wav::read_info(wav).map_err(|e| AppError::new(ErrorCode::ToolFailed, "The prepared audio couldn't be read.").with_detail(e.to_string()))?;
     let total: i64 = spans.iter().map(|(s, e)| (e - s).max(1)).sum::<i64>().max(1);
@@ -414,6 +418,18 @@ pub(crate) fn parse_json(bytes: &[u8]) -> AppResult<Transcript> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn no_spans_means_an_empty_transcript_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"x").unwrap();
+        let opts = Options { model, language: Some("bn".into()), translate: false, use_gpu: false, threads: 4, word_timestamps: true, prompt: None };
+        let t = transcribe_spans(Path::new("whisper-cli"), &dir.path().join("none.wav"), &[], dir.path(), &opts, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
+        assert!(t.words.is_empty());
+    }
 
     #[test]
     fn parses_real_bangla_word_output() {
