@@ -432,7 +432,7 @@ function CaptionOptions() {
         <Button variant="primary" size="lg" icon={<Subtitles size={20} weight="bold" />} onClick={() => void start()} disabled={blocked}>
           Generate captions
         </Button>
-        <p className="hint">Runs on this computer. You can stop at any time.</p>
+        <p className="hint">{online ? "Recognized online by Sarvam, usually in seconds." : "Runs on this computer."} You can stop at any time.</p>
       </div>
     </div>
   );
