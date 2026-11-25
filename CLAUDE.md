@@ -52,6 +52,8 @@ Versions and SHA-256 hashes are in `scripts/tools/versions.env`. The Windows ste
 - `CAPTIONNEST_ARGOS_ROOT=<installed package dir>` enables the ignored Argos reference test:
   `cargo test --lib matches_reference -- --ignored`.
 - `SARVAM_API_KEY` (environment or the gitignored `.env`) is used by `--self-test --online` and `scripts/dev/online_check.py`.
+- `DEEPGRAM_API_KEY` plus `CAPTIONNEST_VOICE_SAMPLES=<a.wav,b.webm,…>` enable the ignored live voice-typing test:
+  `cargo test --lib live_bangla_transcription -- --ignored --nocapture`.
 
 ### Headless self-test
 
@@ -73,6 +75,15 @@ python3 scripts/dev/verify_suite.py                     # checks behind docs/VER
 The zustand store is exposed as `window.__CN_STORE__` for these scripts.
 `scripts/dev/make-test-media.sh` and `make_long_video.py` create test videos with known
 speech. The automation feature never ships in release builds.
+
+Notes on automation:
+
+- With `CAPTIONNEST_AUTOMATION_PORT` set, an automation build skips the single-instance
+  guard, so it can run next to an installed copy. Use `CAPTIONNEST_HOME` to keep its data apart.
+- A window that is covered by other windows doesn't run CSS animations, so screens stay
+  at opacity 0 in snapshots. Run `document.getAnimations().forEach(a => a.finish())` before
+  taking a snapshot.
+- `/snapshot` paths are resolved from the app's working directory. Pass absolute paths.
 
 ## Architecture
 
@@ -163,8 +174,39 @@ and re-measure instead of guessing.
   Icons come from Phosphor only; toasts from sonner.
 - The CSP in `src-tauri/tauri.conf.json` allows only IPC for `connect-src`, and fonts are
   bundled through `@fontsource`. The web view can't reach the network, so all network
-  access (model downloads, Sarvam) happens in Rust. New plugin APIs also need a permission
+  access (model downloads, Sarvam, Deepgram) happens in Rust. New plugin APIs also need a permission
   in `src-tauri/capabilities/default.json`.
+- The caption list (`components/CueList.tsx`) is virtualized with @tanstack/react-virtual.
+  Rows stack in normal flow inside one block shifted by the first item's start, so a
+  caption that grows can't overlap the next one while measurement catches up. Keep it
+  that way; absolutely positioned rows caused overlapping captions.
+
+### Typing aids and added fonts
+
+- **Bangla phonetic typing**: `src/lib/phonetic.ts` is a pure, unit-tested converter
+  (Avro conventions). It searches ambiguous spellings with a cost per less likely choice
+  and ranks them by a vocabulary: the project's Bangla captions plus
+  `lib/banglaWords.ts`. `components/usePhonetic.ts` wires it into the caption textarea.
+  It keeps the roman letters of the word being typed and re-spells the whole word on
+  every key.
+- **Voice typing**: `src/state/voice.ts` records with `getUserMedia` and `MediaRecorder`,
+  then sends the whole recording as raw bytes to `transcribe_voice`. `src-tauri/src/voice.rs`
+  calls Deepgram's pre-recorded API (`model=nova-3&language=bn&smart_format=true`; see
+  docs/VERIFICATION.md). The Deepgram key lives in `config/voice.json`, separate from
+  `settings.json`, and never reaches the web view. Words are inserted with
+  `lib/insertWords.ts`, which never replaces text that changed during recording.
+- WKWebView offers `navigator.mediaDevices` only when the app's Info.plist has
+  `NSMicrophoneUsageDescription` (`src-tauri/Info.plist`). Tauri embeds that file only in
+  dev builds (no `custom-protocol` feature); bundles merge it. A bare
+  `cargo build --features tauri/custom-protocol` binary therefore has no microphone API.
+  Test voice typing with `tauri dev` or a bundled `.app`. `Entitlements.plist` adds
+  audio input for the hardened runtime.
+- **Added caption fonts**: `src-tauri/src/fonts.rs` copies files into `data/fonts/`.
+  Faces are grouped by family, read from the font's `name`, `OS/2`, `fvar` and `cmap`
+  tables (or from the file name for WOFF/WOFF2). Ids are `user-<sha of family>`, the
+  same on every computer. `src/lib/userFonts.ts` loads each file as bytes into a
+  `FontFace` (the CSP allows no font URLs) and registers it with `captionStyle.ts`.
+  A project whose added font is missing keeps the id and draws with the default font.
 
 ## Conventions
 
