@@ -50,13 +50,13 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
   },
   "large-v3-bn-q5_0": {
     id: "large-v3-bn-q5_0",
-    name: "Bangla",
+    name: "Bangla Max",
     summary:
-      "Trained by Mozilla AI on Bangla speech, so it spells Bangla far more accurately than the general models. Used automatically whenever the speech is Bangla.",
+      "The larger Bangla-trained model: slightly fewer spelling mistakes than Bangla, but about four times slower. Used instead of Bangla when both are installed.",
     speed: 1,
     accuracy: 3,
     translates: false,
-    bestFor: "Bangla speech with correct spelling",
+    bestFor: "Bangla speech, highest accuracy",
   },
   small: {
     id: "small",

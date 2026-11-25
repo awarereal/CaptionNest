@@ -1,0 +1,26 @@
+CaptionNest Bangla speech model
+===============================
+
+Files:
+  ggml-large-v3-turbo-bn-q5_0.bin   (and/or ggml-large-v3-bn-q5_0.bin)
+
+These files are whisper.cpp (ggml) conversions of Bengali speech recognition models
+published by Mozilla AI:
+
+  https://huggingface.co/mozilla-ai/whisper-large-v3-turbo-bn
+  https://huggingface.co/mozilla-ai/whisper-large-v3-bn
+
+which are fine-tuned versions of OpenAI Whisper large-v3 / large-v3-turbo
+(https://github.com/openai/whisper, MIT License).
+
+License: Apache License, Version 2.0 (see LICENSE-Apache-2.0.txt), as published by
+Mozilla AI for these models.
+
+Modifications made by CaptionNest:
+  1. Converted from Hugging Face safetensors to ggml format with whisper.cpp v1.9.6
+     models/convert-h5-to-ggml.py (weights unchanged, stored as float16).
+  2. Quantized to q5_0 with whisper.cpp v1.9.6 whisper-quantize.
+No retraining or other changes were made.
+
+SHA-256 checksums are listed in SHA256SUMS.txt and pinned in CaptionNest's model
+catalog (src-tauri/catalog/whisper.json); the app refuses files that don't match.

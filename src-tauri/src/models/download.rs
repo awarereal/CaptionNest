@@ -6,7 +6,7 @@
 //!   file is renamed into place, so a damaged or tampered file is never used.
 //! - Short network failures are retried automatically.
 
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -114,12 +114,16 @@ async fn fetch_into_part(
         r = req.send() => r.map_err(network_error)?,
     };
     let status = resp.status();
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(part)?;
+    // Plain write mode + explicit seek: on Windows an append-only handle can't be
+    // truncated, which a restarted download needs.
+    let mut file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(part)?;
+    file.seek(SeekFrom::End(0))?;
     if status == reqwest::StatusCode::PARTIAL_CONTENT {
         // Resuming.
     } else if status.is_success() {
         // Server sent the whole file: start over.
         file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
         existing = 0;
     } else if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
         file.set_len(0)?;

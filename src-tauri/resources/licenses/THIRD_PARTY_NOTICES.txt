@@ -77,6 +77,14 @@ OpenAI Whisper models (ggml format)
   License: MIT — Copyright (c) 2022 OpenAI
   Source: https://huggingface.co/ggerganov/whisper.cpp
 
+Bangla speech models (Mozilla AI fine-tunes of Whisper)
+  "Bangla" = mozilla-ai/whisper-large-v3-turbo-bn, "Bangla Max" =
+  mozilla-ai/whisper-large-v3-bn (https://huggingface.co/mozilla-ai).
+  License: Apache License 2.0. CaptionNest converted the published weights to
+  whisper.cpp format and quantized them to q5_0 (no other changes) and hosts
+  them at https://github.com/awarereal/CaptionNest/releases/tag/models-bangla-v1
+  together with the license and a NOTICE describing the conversion.
+
 Argos Translate language packages
   Argos Translate is released under the MIT License and CC0
   (https://github.com/argosopentech/argos-translate).

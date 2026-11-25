@@ -27,6 +27,28 @@
    "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
    "canTranslate": true,
    "role": "both"
+  },
+  {
+   "id": "large-v3-bn-q5_0",
+   "file": "ggml-large-v3-bn-q5_0.bin",
+   "url": "https://github.com/awarereal/CaptionNest/releases/download/models-bangla-v1/ggml-large-v3-bn-q5_0.bin",
+   "sizeBytes": 1081140203,
+   "sha256": "ae20121f227ecb17f3f1f4024f5339c7729ea8ce3932dd4dd1f1d89d6874c941",
+   "canTranslate": false,
+   "role": "transcribe",
+   "language": "bn",
+   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-bn (Apache-2.0), converted to ggml q5_0"
+  },
+  {
+   "id": "large-v3-turbo-bn-q5_0",
+   "file": "ggml-large-v3-turbo-bn-q5_0.bin",
+   "url": "https://github.com/awarereal/CaptionNest/releases/download/models-bangla-v1/ggml-large-v3-turbo-bn-q5_0.bin",
+   "sizeBytes": 574041195,
+   "sha256": "129273f5ef6381ea55126dd72c30525ed9506c1c329c80e58b377ca215ad075e",
+   "canTranslate": false,
+   "role": "transcribe",
+   "language": "bn",
+   "source": "https://huggingface.co/mozilla-ai/whisper-large-v3-turbo-bn (Apache-2.0), converted to ggml q5_0"
   }
  ]
 }
