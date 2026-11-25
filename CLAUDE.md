@@ -106,6 +106,11 @@ Notes on automation:
   Model downloads are tracked separately by model id and emit `download-progress`.
 - Each job gets a `ScratchDir` that is deleted when the job ends; `sweep_abandoned` cleans
   leftovers at startup.
+- Wrap a job's work in `jobs::guard(...)` so a panic still ends the job with an error;
+  otherwise the interface waits forever for `job-finished`.
+- Plain (non-async) commands run on the main thread. Any command that touches the disk
+  must be `async` and do its work through `off_main` in `lib.rs`, or a slow drive
+  freezes the window.
 
 ### Generation pipeline (`src-tauri/src/pipeline.rs`)
 

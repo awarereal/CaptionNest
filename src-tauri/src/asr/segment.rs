@@ -247,10 +247,11 @@ fn drop_instant_duplicates(words: &[Word]) -> Vec<Word> {
 pub fn from_segments(segments: &[Word], opts: &Options, media_end_ms: Option<i64>) -> Vec<Cue> {
     let mut segments = drop_instant_duplicates(segments);
     // A decoding loop repeats the same sentence segment after segment: keep one,
-    // spanning the whole stretch.
+    // spanning the whole stretch. The same line said again later (a gap of more than a
+    // second) is real speech and stays a caption of its own.
     let key = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
     segments.dedup_by(|b, a| {
-        if !key(&a.text).is_empty() && key(&a.text) == key(&b.text) {
+        if !key(&a.text).is_empty() && key(&a.text) == key(&b.text) && b.start_ms - a.end_ms <= 1_000 {
             a.end_ms = a.end_ms.max(b.end_ms);
             true
         } else {
@@ -408,6 +409,16 @@ pub fn wrap_text(text: &str, max_line_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_line_said_again_later_stays_two_captions() {
+        let w = |s: i64, e: i64, t: &str| Word { start_ms: s, end_ms: e, text: t.into(), confidence: 1.0 };
+        let looped = from_segments(&[w(0, 1_000, "Thank you."), w(1_000, 2_000, "Thank you.")], &Options::default(), None);
+        assert_eq!(looped.len(), 1);
+        let later = from_segments(&[w(10_000, 11_000, "Thank you."), w(40_000, 41_000, "Thank you.")], &Options::default(), None);
+        assert_eq!(later.len(), 2);
+        assert!(later[0].end_ms <= 12_000);
+    }
 
     fn words(spec: &[(i64, i64, &str)]) -> Vec<Word> {
         spec.iter().map(|(s, e, t)| Word { confidence: 1.0, start_ms: *s, end_ms: *e, text: format!(" {t}") }).collect()

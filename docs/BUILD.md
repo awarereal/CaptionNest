@@ -99,7 +99,9 @@ and decoding settings (see docs/VERIFICATION.md).
 - Argos language packs: `python3 scripts/catalog/build_argos_catalog.py` (downloads each
   package once to record size, SHA-256 and tokenizer).
 - Whisper models: edit `src-tauri/catalog/whisper.json` with values from the Hugging Face
-  API (`https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main`).
+  API (`https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/<commit>`). Use a
+  `resolve/<commit>/` URL, never `resolve/main/`: a re-upload on `main` would otherwise
+  make every install fail its SHA-256 check.
 - License list: `node scripts/licenses/collect.mjs`.
 
 ## FFmpeg source availability (LGPL)

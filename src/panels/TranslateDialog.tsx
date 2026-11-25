@@ -43,8 +43,10 @@ export function TranslateDialog({ open, onOpenChange }: { open: boolean; onOpenC
     return out.sort((a, b) => (a.group === b.group ? a.label.localeCompare(b.label) : 0));
   }, [models, tracks, translator]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A language that is already a track (e.g. translated a moment ago) can't be chosen
+  // again: translating it would replace that track and its edits.
   useEffect(() => {
-    if (open && !target && items[0]) setTarget(items[0].value);
+    if (open && !items.some((i) => i.value === target)) setTarget(items[0]?.value ?? "");
   }, [open, items, target]);
 
   useEffect(() => {
@@ -60,7 +62,7 @@ export function TranslateDialog({ open, onOpenChange }: { open: boolean; onOpenC
   const missing = (plan?.missingPackages ?? []).map((id) => models?.argos.find((p) => p.id === id)).filter(Boolean);
   const needsModel = (plan?.needsTranslationModel ?? false) && !translator;
   const needsVideo = plan?.plan?.kind === "whisperEnglish" || (plan?.plan?.kind === "text" && plan.plan.fromWhisperEnglish);
-  const blocked = !target || !plan?.plan || missing.length > 0 || needsModel || (needsVideo && videoMissing);
+  const blocked = !target || !items.some((i) => i.value === target) || !plan?.plan || missing.length > 0 || needsModel || (needsVideo && videoMissing);
 
   return (
     <Modal

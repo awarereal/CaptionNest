@@ -90,11 +90,28 @@ fn get_settings(state: State<AppState>) -> settings::Settings {
     state.settings.lock().unwrap().clone()
 }
 
+/// Runs file work on a worker thread. Plain (non-async) commands run on the main thread,
+/// where a slow or offline drive, or deleting a large model, would freeze the window.
+async fn off_main<T: Send + 'static>(app: &AppHandle, work: impl FnOnce(&AppState) -> AppResult<T> + Send + 'static) -> AppResult<T> {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || work(app.state::<AppState>().inner()))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?
+}
+
 #[tauri::command]
-fn save_settings(state: State<AppState>, settings: settings::Settings) -> Cmd<()> {
-    settings::save(&state.paths.config, &settings)?;
-    *state.settings.lock().unwrap() = settings;
-    Ok(())
+async fn save_settings(app: AppHandle, settings: settings::Settings) -> Cmd<()> {
+    off_main(&app, move |state| {
+        let mut current = state.settings.lock().unwrap();
+        let mut settings = settings;
+        // The recent-projects list is kept here, not in the interface: a copy sent from
+        // the interface may be older than a project that was just opened.
+        settings.recent_projects = current.recent_projects.clone();
+        settings::save(&state.paths.config, &settings)?;
+        *current = settings;
+        Ok(())
+    })
+    .await
 }
 
 // ---------- media ----------
@@ -151,7 +168,7 @@ fn burn_begin(state: State<'_, AppState>) -> Cmd<String> {
 
 /// Saves one caption image (PNG bytes as the raw request body).
 #[tauri::command]
-fn burn_frame(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Cmd<()> {
+async fn burn_frame(app: AppHandle, request: tauri::ipc::Request<'_>) -> Cmd<()> {
     let header = |name: &str| request.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
     let (Some(id), Some(file)) = (header("x-burn-id"), header("x-file")) else {
         return Err(AppError::internal("caption image without a name"));
@@ -162,12 +179,16 @@ fn burn_frame(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> C
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(AppError::internal("caption image must be sent as bytes"));
     };
-    let dir = state.paths.jobs.join(format!("burn-{id}"));
-    if !dir.is_dir() {
-        return Err(AppError::internal("caption image folder is gone"));
-    }
-    std::fs::write(dir.join(file), bytes)?;
-    Ok(())
+    let bytes = bytes.clone();
+    off_main(&app, move |state| {
+        let dir = state.paths.jobs.join(format!("burn-{id}"));
+        if !dir.is_dir() {
+            return Err(AppError::internal("caption image folder is gone"));
+        }
+        std::fs::write(dir.join(file), bytes)?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -208,8 +229,8 @@ async fn check_online_key(state: State<'_, AppState>, key: String) -> Cmd<()> {
 // ---------- caption fonts the user adds ----------
 
 #[tauri::command]
-fn list_fonts(state: State<AppState>) -> Vec<fonts::UserFont> {
-    fonts::list(&state.paths.fonts)
+async fn list_fonts(app: AppHandle) -> Cmd<Vec<fonts::UserFont>> {
+    off_main(&app, |state| Ok(fonts::list(&state.paths.fonts))).await
 }
 
 #[tauri::command]
@@ -232,8 +253,8 @@ async fn font_file(state: State<'_, AppState>, file: String) -> Cmd<tauri::ipc::
 }
 
 #[tauri::command]
-fn remove_font(state: State<AppState>, id: String) -> Cmd<Vec<fonts::UserFont>> {
-    fonts::remove(&state.paths.fonts, &id)
+async fn remove_font(app: AppHandle, id: String) -> Cmd<Vec<fonts::UserFont>> {
+    off_main(&app, move |state| fonts::remove(&state.paths.fonts, &id)).await
 }
 
 // ---------- voice typing ----------
@@ -351,7 +372,12 @@ struct ModelState {
 }
 
 #[tauri::command]
-fn model_state(state: State<AppState>) -> ModelState {
+async fn model_state(app: AppHandle) -> Cmd<ModelState> {
+    // Sizing the models folder reads every file in it.
+    off_main(&app, |state| Ok(model_state_now(state))).await
+}
+
+fn model_state_now(state: &AppState) -> ModelState {
     let p = &state.paths;
     let active = state.jobs.active_downloads();
     let whisper = catalog::whisper()
@@ -459,15 +485,18 @@ fn cancel_download(state: State<AppState>, id: String) {
 }
 
 #[tauri::command]
-fn remove_model(state: State<AppState>, id: String) -> Cmd<()> {
-    if let Some(m) = catalog::whisper_model(&id) {
-        return models::remove_whisper(&state.paths, m);
-    }
-    if let Some(pkg) = catalog::argos_package(&id) {
-        let _ = std::fs::remove_file(models::download::part_path(&state.paths.downloads().join(format!("{}.argosmodel", pkg.id))));
-        return models::remove_argos(&state.paths, pkg);
-    }
-    Err(AppError::internal(format!("unknown model {id}")))
+async fn remove_model(app: AppHandle, id: String) -> Cmd<()> {
+    off_main(&app, move |state| {
+        if let Some(m) = catalog::whisper_model(&id) {
+            return models::remove_whisper(&state.paths, m);
+        }
+        if let Some(pkg) = catalog::argos_package(&id) {
+            let _ = std::fs::remove_file(models::download::part_path(&state.paths.downloads().join(format!("{}.argosmodel", pkg.id))));
+            return models::remove_argos(&state.paths, pkg);
+        }
+        Err(AppError::internal(format!("unknown model {id}")))
+    })
+    .await
 }
 
 // ---------- captions & export ----------
@@ -492,7 +521,11 @@ struct ExportResult {
 }
 
 #[tauri::command]
-fn export_srt(path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
+async fn export_srt(app: AppHandle, path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
+    off_main(&app, move |_| write_srt(path, cues)).await
+}
+
+fn write_srt(path: String, cues: Vec<Cue>) -> AppResult<ExportResult> {
     let report = validate::validate(&cues);
     if report.has_blocking() {
         return Err(AppError::new(ErrorCode::ExportInvalid, "Some captions need fixing before export.")
@@ -511,29 +544,40 @@ fn export_srt(path: String, cues: Vec<Cue>) -> Cmd<ExportResult> {
 }
 
 #[tauri::command]
-fn import_srt(path: String) -> Cmd<Vec<Cue>> {
-    let bytes = std::fs::read(&path)?;
-    let text = String::from_utf8(bytes).map_err(|_| AppError::new(ErrorCode::ProjectInvalid, "This SRT file isn't UTF-8 text."))?;
-    captions::srt::parse_srt(&text).map_err(|e| AppError::new(ErrorCode::ProjectInvalid, "This SRT file couldn't be read.").with_detail(e))
+async fn import_srt(app: AppHandle, path: String) -> Cmd<Vec<Cue>> {
+    off_main(&app, move |_| {
+        let bytes = std::fs::read(&path)?;
+        let text = String::from_utf8(bytes).map_err(|_| AppError::new(ErrorCode::ProjectInvalid, "This SRT file isn't UTF-8 text."))?;
+        captions::srt::parse_srt(&text).map_err(|e| AppError::new(ErrorCode::ProjectInvalid, "This SRT file couldn't be read.").with_detail(e))
+    })
+    .await
 }
 
 // ---------- projects ----------
 
 #[tauri::command]
-fn save_project(app: AppHandle, state: State<AppState>, path: String, project: project::Project) -> Cmd<()> {
-    project::save(Path::new(&path), &project)?;
-    remember_project(&app, &state, &path, &project);
-    Ok(())
+async fn save_project(app: AppHandle, path: String, project: project::Project) -> Cmd<()> {
+    let handle = app.clone();
+    off_main(&app, move |state| {
+        project::save(Path::new(&path), &project)?;
+        remember_project(&handle, state, &path, &project);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-fn load_project(app: AppHandle, state: State<AppState>, path: String) -> Cmd<project::LoadedProject> {
-    let loaded = project::load(Path::new(&path))?;
-    if let project::VideoStatus::Found { path: v } | project::VideoStatus::Changed { path: v } = &loaded.video_status {
-        allow_media(&app, Path::new(v));
-    }
-    remember_project(&app, &state, &path, &loaded.project);
-    Ok(loaded)
+async fn load_project(app: AppHandle, path: String) -> Cmd<project::LoadedProject> {
+    let handle = app.clone();
+    off_main(&app, move |state| {
+        let loaded = project::load(Path::new(&path))?;
+        if let project::VideoStatus::Found { path: v } | project::VideoStatus::Changed { path: v } = &loaded.video_status {
+            allow_media(&handle, Path::new(v));
+        }
+        remember_project(&handle, state, &path, &loaded.project);
+        Ok(loaded)
+    })
+    .await
 }
 
 fn remember_project(_app: &AppHandle, state: &AppState, path: &str, p: &project::Project) {
@@ -548,15 +592,20 @@ fn remember_project(_app: &AppHandle, state: &AppState, path: &str, p: &project:
 }
 
 #[tauri::command]
-fn forget_recent(state: State<AppState>, path: String) -> Cmd<()> {
-    let mut s = state.settings.lock().unwrap();
-    s.recent_projects.retain(|r| r.path != path);
-    settings::save(&state.paths.config, &s)
+async fn forget_recent(app: AppHandle, path: String) -> Cmd<()> {
+    off_main(&app, move |state| {
+        let mut s = state.settings.lock().unwrap();
+        s.recent_projects.retain(|r| r.path != path);
+        settings::save(&state.paths.config, &s)
+    })
+    .await
 }
 
+/// Off the main thread: a recent project on an offline network drive can take a long
+/// time to answer.
 #[tauri::command]
-fn path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+async fn path_exists(app: AppHandle, path: String) -> Cmd<bool> {
+    off_main(&app, move |_| Ok(Path::new(&path).exists())).await
 }
 
 #[tauri::command]

@@ -123,11 +123,13 @@ export function activeIndex(sorted: Cue[], ms: number): number {
       lo = mid + 1;
     } else hi = mid - 1;
   }
-  // Overlapping cues: walk back to the latest cue that still covers `ms`.
+  // Overlapping cues: the earliest one that still covers `ms` wins, the same rule the
+  // burned-in video export uses (each caption shows until it ends, the next one after).
+  let hit = -1;
   for (let i = found; i >= 0 && i > found - 4; i--) {
-    if (sorted[i].startMs <= ms && ms < sorted[i].endMs) return i;
+    if (sorted[i].startMs <= ms && ms < sorted[i].endMs) hit = i;
   }
-  return -1;
+  return hit;
 }
 
 function nearestBoundary(text: string, from: number): number {

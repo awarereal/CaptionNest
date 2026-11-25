@@ -120,6 +120,14 @@ export function Player({
             onPlay={() => setPlayhead({ playing: true })}
             onPause={() => setPlayhead({ playing: false, ms: (videoRef.current?.currentTime ?? 0) * 1000 })}
             onEnded={() => setPlayhead({ playing: false })}
+            // A new video element (another screen, a preview copy) starts where the
+            // playhead is, so the picture, the captions and "Add caption" agree.
+            onLoadedMetadata={(e) => {
+              const { ms } = usePlayhead.getState();
+              const at = Math.max(0, Math.min(durationMs, ms));
+              if (Math.abs(e.currentTarget.currentTime * 1000 - at) > 40) e.currentTarget.currentTime = at / 1000;
+              setPlayhead({ ms: at, playing: false });
+            }}
             onSeeked={() => setPlayhead({ ms: (videoRef.current?.currentTime ?? 0) * 1000 })}
             onError={() => setFailed(true)}
             onClick={togglePlay}

@@ -7,6 +7,7 @@ import { createHistory, record, redo as redoH, undo as undoH, type History } fro
 import { DEFAULT_MODEL_ID, MODEL_INFO } from "../lib/models";
 import { lastStyle, normalizeStyle, rememberStyle, type CaptionStyle } from "../lib/captionStyle";
 import { useBurn } from "./burn";
+import { usePlayhead } from "./playhead";
 import type {
   AppError,
   AppInfo,
@@ -364,7 +365,8 @@ export const useStore = create<Store>((set, get) => {
       }
       if (e.kind === "preview") {
         const p = get().preview;
-        if (p.jobId && p.jobId !== e.jobId) return;
+        // Only the conversion this screen asked for: not one for a video closed since.
+        if (p.status !== "converting" || (p.jobId && p.jobId !== e.jobId)) return;
         if (e.outcome.status === "success") {
           const r = e.outcome.result as Preview;
           set({ preview: { status: r.hasVideo ? "ready" : "audio-only", url: mediaUrl(r.path) } });
@@ -591,3 +593,12 @@ export const installedModelIds = (models: ModelState | null) =>
 
 export const canTranslateInstalled = (models: ModelState | null) =>
   (models?.whisper ?? []).some((m) => m.installed && (MODEL_INFO[m.id]?.translates ?? m.canTranslate));
+
+// A different video (or none): stop any preview conversion for the old one, and start
+// the playhead at the beginning so captions aren't added at the old video's time.
+useStore.subscribe((now, before) => {
+  if (now.media?.path === before.media?.path) return;
+  const p = before.preview;
+  if (p.status === "converting" && p.jobId) void api.cancelJob(p.jobId).catch(() => undefined);
+  usePlayhead.getState().set({ ms: 0, playing: false });
+});
