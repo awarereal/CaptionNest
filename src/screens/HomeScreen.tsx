@@ -1,10 +1,52 @@
 import { useEffect, useState } from "react";
-import { FilmSlate, FolderOpen, X, Warning, CheckCircle, ClockCounterClockwise } from "@phosphor-icons/react";
+import { FilmSlate, FolderOpen, X, Warning, CheckCircle, ClockCounterClockwise, LinkSimple, ArrowRight } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { browseProject, browseVideo, openPath } from "../lib/fileFlows";
 import { api } from "../lib/api";
 import { Button, IconButton } from "../components/ui";
 import { modelName } from "../lib/models";
+import { looksLikeLink, useLink } from "../state/link";
+
+/** "Or paste a video link": the way in to getting a video from YouTube and other sites. */
+function LinkBar() {
+  const [url, setUrl] = useState("");
+  const open = useLink((s) => s.open);
+  const go = (text: string) => {
+    if (!text.trim()) return;
+    void open(text);
+    setUrl("");
+  };
+  return (
+    <form
+      className="linkbar"
+      onSubmit={(e) => {
+        e.preventDefault();
+        go(url);
+      }}
+    >
+      <LinkSimple size={18} className="linkbar__icon" aria-hidden />
+      <input
+        className="linkbar__input"
+        value={url}
+        placeholder="Or paste a YouTube or other video link"
+        aria-label="Video link"
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => setUrl(e.target.value)}
+        onPaste={(e) => {
+          const text = e.clipboardData.getData("text");
+          if (looksLikeLink(text)) {
+            e.preventDefault();
+            go(text);
+          }
+        }}
+      />
+      <Button type="submit" size="sm" variant="ghost" trailing={<ArrowRight size={15} weight="bold" />} disabled={!url.trim()}>
+        Get video
+      </Button>
+    </form>
+  );
+}
 
 function relativeDate(ms: number) {
   const diff = Date.now() - ms;
@@ -43,6 +85,19 @@ export function HomeScreen() {
     useStore.setState((st) => (st.settings ? { settings: { ...st.settings, recentProjects: s.recentProjects } } : {}));
   };
 
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target;
+      if (t instanceof Element && t.closest("input, textarea, [contenteditable], [role=dialog]")) return;
+      const text = e.clipboardData?.getData("text") ?? "";
+      if (!looksLikeLink(text)) return;
+      e.preventDefault();
+      void useLink.getState().open(text);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
+
   return (
     <div className="home">
       <section className="gate" aria-labelledby="gate-title">
@@ -74,6 +129,7 @@ export function HomeScreen() {
           </Button>
         </div>
         <p className="gate__formats">MP4 · MOV · MKV · WebM · and most audio files</p>
+        <LinkBar />
       </section>
 
       {recent.length > 0 && (

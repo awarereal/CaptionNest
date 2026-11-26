@@ -26,6 +26,39 @@ pub fn command(program: &Path) -> Command {
     cmd
 }
 
+/// Like `command`, for a program that starts programs of its own (yt-dlp runs ffmpeg and
+/// Deno): it gets its own process group, so stopping it stops them too.
+pub fn command_tree(program: &Path) -> Command {
+    let mut cmd = command(program);
+    #[cfg(unix)]
+    cmd.process_group(0);
+    cmd
+}
+
+/// Stops a process and everything it started. On macOS that's its process group (only
+/// set up by `command_tree`; for other processes the group kill finds nothing and the
+/// plain kill below does the work); on Windows, the process tree.
+async fn kill_tree(child: &mut Child) {
+    if let Some(pid) = child.id() {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("/bin/kill").args(["-KILL", "--", &format!("-{pid}")]).stderr(Stdio::null()).status();
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+    let _ = child.kill().await;
+}
+
 pub struct Output {
     pub status: std::process::ExitStatus,
     pub stdout: Vec<u8>,
@@ -62,7 +95,7 @@ where
     while !(out_done && err_done) {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
+                kill_tree(&mut child).await;
                 return Err(AppError::cancelled());
             }
             line = out.next(), if !out_done => match line {
@@ -90,7 +123,7 @@ where
     }
     let status = tokio::select! {
         _ = cancel.cancelled() => {
-            let _ = child.kill().await;
+            kill_tree(&mut child).await;
             return Err(AppError::cancelled());
         }
         status = child.wait() => status?,

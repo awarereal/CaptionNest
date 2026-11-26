@@ -7,6 +7,7 @@ mod captions;
 mod error;
 mod fonts;
 mod jobs;
+mod links;
 mod media;
 mod models;
 mod paths;
@@ -593,7 +594,7 @@ async fn install(
     state: &AppState,
     id: &str,
     cancel: &tokio_util::sync::CancellationToken,
-    emit: &impl Fn(&'static str, u64, u64, f64, Option<AppError>),
+    emit: &(impl Fn(&'static str, u64, u64, f64, Option<AppError>) + Sync),
 ) -> AppResult<u64> {
     let p = &state.paths;
     if let Some(m) = catalog::whisper_model(id) {
@@ -604,6 +605,9 @@ async fn install(
         .await?;
         models::mark_whisper_verified(&dest, &m.sha256)?;
         return Ok(m.size_bytes);
+    }
+    if id == links::tools::TOOLS_ID {
+        return links::tools::install(&state.http, p, false, cancel, &|stage, pr| emit(stage, pr.received, pr.total, pr.bytes_per_sec, None)).await;
     }
     let pkg = catalog::argos_package(id).ok_or_else(|| AppError::internal(format!("unknown model {id}")))?;
     let archive = p.downloads().join(format!("{}.argosmodel", pkg.id));
@@ -622,6 +626,97 @@ async fn install(
     models::write_argos_marker(&dest, pkg)?;
     let _ = std::fs::remove_file(&archive);
     Ok(pkg.size_bytes)
+}
+
+// ---------- video links ----------
+
+/// Movies (macOS) or Videos (Windows) › CaptionNest, unless the user chose a folder.
+fn clip_folder(app: &AppHandle, state: &AppState) -> std::path::PathBuf {
+    if let Some(f) = state.settings.lock().unwrap().clip_folder.clone().filter(|f| !f.trim().is_empty()) {
+        return f.into();
+    }
+    let base = app.path().video_dir().or_else(|_| app.path().home_dir()).unwrap_or_default();
+    base.join("CaptionNest")
+}
+
+#[tauri::command]
+fn link_tools_state(app: AppHandle, state: State<AppState>) -> links::tools::ToolsState {
+    links::tools::state(&state.paths, &clip_folder(&app, &state))
+}
+
+/// Reads a link: title, length, preview frames and quality choices. Every few days it
+/// first brings yt-dlp up to date (sites change; yt-dlp follows).
+#[tauri::command]
+async fn probe_link(app: AppHandle, url: String) -> Cmd<links::fetch::LinkInfo> {
+    let state = app.state::<AppState>();
+    let cancel = links::begin_probe();
+    if links::tools::installed(&state.paths).is_none() {
+        return Err(AppError::new(ErrorCode::ToolMissing, "The video-link downloader isn't set up yet."));
+    }
+    // An update is only attempted when a check is due (every few days); not reaching
+    // GitHub isn't a reason to stop: the installed copy is used.
+    if let Some(c) = state.jobs.begin_download(links::tools::TOOLS_ID) {
+        let send = |stage: &'static str, received: u64, total: u64, bytes_per_sec: f64| {
+            let _ = app.emit("download-progress", DownloadEvent { id: links::tools::TOOLS_ID.into(), state: stage, received, total, bytes_per_sec, error: None });
+        };
+        let r = links::tools::install(&state.http, &state.paths, true, &c, &|stage, pr| send(stage, pr.received, pr.total, pr.bytes_per_sec)).await;
+        state.jobs.end_download(links::tools::TOOLS_ID);
+        if let Ok(total) = r {
+            if total > 0 {
+                send("done", total, total, 0.0);
+            }
+        }
+        if let Err(e) = r {
+            log::warn!("link tools update skipped: {e:?}");
+        }
+    }
+    let tools = links::tools::installed(&state.paths).ok_or_else(|| AppError::new(ErrorCode::ToolMissing, "The video-link downloader isn't set up yet."))?;
+    links::fetch::probe(&tools, &state.paths, &url, &cancel).await
+}
+
+#[tauri::command]
+fn cancel_link_probe() {
+    links::cancel_probe();
+}
+
+/// A preview picture (thumbnail or storyboard sheet) as raw bytes: the page itself
+/// can't reach the internet.
+#[tauri::command]
+async fn link_image(state: State<'_, AppState>, url: String) -> Cmd<tauri::ipc::Response> {
+    if !url.starts_with("https://") || url.len() > 4096 {
+        return Err(AppError::new(ErrorCode::LinkFailed, "That picture can't be shown."));
+    }
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(20), state.http.get(&url).send())
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Network, "The picture took too long to load."))?
+        .map_err(|e| AppError::new(ErrorCode::Network, "Couldn't load the picture.").with_detail(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(AppError::new(ErrorCode::Network, "Couldn't load the picture.").with_detail(format!("HTTP {}", resp.status())));
+    }
+    let bytes = resp.bytes().await.map_err(|e| AppError::new(ErrorCode::Network, "Couldn't load the picture.").with_detail(e.to_string()))?;
+    if bytes.len() > 8_000_000 {
+        return Err(AppError::new(ErrorCode::LinkFailed, "That picture is too large to show."));
+    }
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
+#[tauri::command]
+async fn start_link(app: AppHandle, state: State<'_, AppState>, request: links::fetch::LinkRequest) -> Cmd<String> {
+    let tools = links::tools::installed(&state.paths).ok_or_else(|| AppError::new(ErrorCode::ToolMissing, "The video-link downloader isn't set up yet."))?;
+    let (job_id, cancel) = state.jobs.begin(JobKind::Link);
+    let id = job_id.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = handle.state::<AppState>();
+        let report = std::sync::Arc::new(Reporter::new(handle.clone(), id.clone(), JobKind::Link));
+        let result = jobs::guard(async {
+            let scratch = jobs::ScratchDir::create(&state.paths.jobs, &id)?;
+            links::fetch::download(&tools, &state.paths, &request, scratch.path(), &cancel, &report).await
+        })
+        .await;
+        jobs::finish(&handle, &state.jobs, JobKind::Link, &id, result);
+    });
+    Ok(job_id)
 }
 
 #[tauri::command]
@@ -811,6 +906,7 @@ pub fn run() {
                 log::error!("setup failed: {e:?}");
             })?;
             jobs::sweep_abandoned(&paths.jobs);
+            links::sweep_cache(&paths.link_cache);
             #[cfg(feature = "automation")]
             automation::start(app.handle());
             let settings = settings::load(&paths.config);
@@ -872,6 +968,11 @@ pub fn run() {
             model_state,
             download_model,
             cancel_download,
+            link_tools_state,
+            probe_link,
+            cancel_link_probe,
+            link_image,
+            start_link,
             remove_model,
             validate_cues,
             fix_overlaps,

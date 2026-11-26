@@ -201,6 +201,16 @@ for w, h in SIZES:
     flow.go_home()
     check("home", size)
 
+    # Paste a video link (Blender's CC-BY Big Buck Bunny; needs the link programs installed).
+    ui.eval_js("""const f = document.querySelector('.linkbar__input');
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        set.call(f, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=90'); f.dispatchEvent(new Event('input', {bubbles: true}));
+        f.form.requestSubmit(); return true""")
+    if ui.wait("return !!document.querySelector('.linkcard:not(.linkcard--loading)') || !!document.querySelector('.linksetup')", 90):
+        ui.wait("return document.querySelectorAll('.trim__frames .frame.is-loaded').length >= 4", 20)
+        check("link-dialog", size)
+    close_layers()
+
     # Settings: every section.
     for section in ["models", "online", "voice", "languages", "captions", "appearance", "processing", "storage", "about"]:
         ui.eval_js(f'window.__CN_STORE__.getState().openPanel("settings", "{section}"); return true')

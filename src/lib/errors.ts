@@ -80,6 +80,8 @@ export function describeError(e: AppError): Described {
       return { title: "Voice typing stopped", message: m, actions: ["retry", "show-details"] };
     case "font_invalid":
       return { title: "Font can't be used", message: m, actions: [] };
+    case "link_failed":
+      return { title: "Couldn't get the video", message: m, actions: ["retry", "show-details"] };
     case "online_failed":
       return { title: "Online recognition stopped", message: m, actions: ["retry", "open-online", "show-details"] };
     default:
