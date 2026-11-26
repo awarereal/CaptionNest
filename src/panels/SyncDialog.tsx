@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, CheckCircle, Clock, Desktop, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, Clock, Desktop, Globe, WarningCircle } from "@phosphor-icons/react";
 import { useStore } from "../state/store";
 import { useSync } from "../state/sync";
 import { sortCues } from "../lib/cueOps";
 import { describeError } from "../lib/errors";
 import { languageName } from "../lib/languages";
 import { modelName } from "../lib/models";
+import { syncWithDeepgram } from "../lib/online";
+import { useVoice } from "../state/voice";
 import { parseTimecode } from "../lib/time";
 import type { ModelState, Stage, SyncedCue, SyncSummary, Track } from "../lib/types";
 import { Button, Modal, ProgressBar } from "../components/ui";
@@ -54,11 +56,13 @@ export function SyncDialog() {
   const media = useStore((s) => s.media);
   const videoMissing = useStore((s) => s.videoMissing);
   const openPanel = useStore((s) => s.openPanel);
+  const deepgramKey = useVoice((s) => !!s.status?.keySaved);
   const track = tracks.find((t) => t.id === sync.trackId) ?? null;
   const open = sync.phase !== "closed";
   if (!project || !track) return null;
 
   const model = listeningModel(models, track, settings?.transcribeModelId);
+  const online = syncWithDeepgram(settings, deepgramKey, track?.language);
   const blocked =
     track.kind === "translation"
       ? "These captions are a translation, so their words aren't the words spoken. Auto-sync the captions in the spoken language instead."
@@ -95,7 +99,7 @@ export function SyncDialog() {
               Cancel
             </Button>
             <span className="spacer" />
-            <Button variant="primary" icon={<Clock size={16} weight="bold" />} disabled={!!blocked || !model} onClick={() => void sync.start()}>
+            <Button variant="primary" icon={<Clock size={16} weight="bold" />} disabled={!!blocked || (!model && !online)} onClick={() => void sync.start()}>
               {sync.phase === "failed" ? "Try again" : "Find the right times"}
             </Button>
           </>
@@ -133,7 +137,15 @@ export function SyncDialog() {
               </fieldset>
               {sync.scope === "section" && <SectionRange durationMs={project.video.durationMs} track={track} />}
 
-              {model ? (
+              {online ? (
+                <div className="engine engine--online">
+                  <Globe size={18} />
+                  <div className="engine__body">
+                    <p className="engine__title">Listens online with Deepgram</p>
+                    <p className="hint">Hears the words even over music, and every word has its own time. Uses your Deepgram credits.</p>
+                  </div>
+                </div>
+              ) : model ? (
                 <div className="engine">
                   <Desktop size={18} />
                   <div className="engine__body">

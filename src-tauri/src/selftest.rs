@@ -77,6 +77,11 @@ async fn run_resync(app: &AppHandle, t: &SelfTest, captions: &std::path::Path) -
             to_ms: t.section.1,
             transcribe_model_id: String::new(),
             use_gpu: true,
+            deepgram: if t.online {
+                std::env::var("DEEPGRAM_API_KEY").ok().map(|key| crate::voice::Deepgram { key, http: state.http.clone() })
+            } else {
+                None
+            },
         };
         let reporter = Reporter::new(app.clone(), "self-test".into(), JobKind::Sync);
         let res = pipeline::resync_captions(&state.paths, req, "self-test", &tokio_util::sync::CancellationToken::new(), &reporter).await?;
