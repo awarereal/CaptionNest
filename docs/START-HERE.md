@@ -95,6 +95,32 @@ models automatically.
    at any time. Long videos are fine — roughly, a 10-minute video takes a few minutes on
    an Apple-chip Mac and longer on computers without a supported graphics chip.
 
+### Get a video from a link (YouTube and other sites)
+
+Under **Choose video**, paste a link into **Or paste a YouTube or other video link**
+(or just paste a link anywhere on the start screen).
+
+1. The first time, CaptionNest asks to download two free programs it needs for this
+   (yt-dlp and Deno, about 95 MB). They come from their official pages, are checked,
+   and are kept up to date.
+2. CaptionNest reads the link and shows the video's title, channel and length.
+3. Choose **The whole video** or **Only a part**. For a part, drag the gold handles on
+   the strip of pictures from the video, or type the start and end times. A link with a
+   start time in it (YouTube's `&t=90`) starts the part there.
+4. Choose the quality: **For editing** (MP4, up to 1080p, opens in CapCut and every
+   editor), **Highest quality** (up to 4K) or **Sound only** (smallest; enough for
+   captions). Each shows about how big the file will be.
+5. Click **Get this part** (or **Get video**). Only the chosen part is downloaded, so it's
+   quick. The video is saved in **Movies › CaptionNest** (Mac) or **Videos › CaptionNest**
+   (Windows) — click **Change…** to pick another folder — and opens for captions.
+
+You can close the window while it downloads; a small notice shows the progress and
+the video still opens when it's ready.
+
+Only get videos you made or have permission to use. Downloading other people's videos
+can break YouTube's rules and copyright law. Private, members-only, age-restricted and
+copy-protected videos, and live streams that haven't ended, can't be downloaded.
+
 ---
 
 ## 5. Review and edit

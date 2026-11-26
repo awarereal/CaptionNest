@@ -202,6 +202,32 @@ and re-measure instead of guessing.
   recommendations for speech models live in `src/lib/models.ts`, keyed by catalog id.
   Rebuild the Argos catalog with `python3 scripts/catalog/build_argos_catalog.py`.
 
+### Video links (`src-tauri/src/links/`, `state/link.ts`, `panels/LinkDialog.tsx`)
+
+"Paste a video link" gets a whole video or one part from YouTube and other sites, then
+opens it for captions. Measured facts behind it (yt-dlp 2026.11.23):
+
+- yt-dlp and Deno are **downloaded on first use** into `data/link-tools/` (never bundled:
+  sites change every few weeks), found via the GitHub "latest" redirect (the API
+  rate-limits shared addresses with 403), SHA-256 checked against the release's own
+  checksum file, yt-dlp refreshed every 3 days. Their **onedir** builds are used: the
+  single-file one unpacks itself on every start and macOS rescans it (12 s per run).
+  YouTube needs Deno (without a JS runtime most formats are hidden).
+- A **part** is cut by ffmpeg straight from the site (`--download-sections`), stream
+  copy. That's why the bundled FFmpeg has network protocols (OS TLS only). Parts prefer
+  **HLS** (`-S proto:m3u8`): a 2-min 1080p part took 10 s over HLS, 63 s over https
+  (ffmpeg's single long request is throttled). Parts never use DASH (no DASH demuxer:
+  it needs libxml2; Commons labels an `.mpd` as https, so `[ext!=mpd]` too). Whole
+  videos use yt-dlp's own downloader.
+- A link is read once (`-J`, saved to `cache/links/info-<key>.json`); quality choices
+  and the download use `--load-info-json` (no second 15 s read). yt-dlp gives no
+  progress for parts, so progress is the job scratch folder's size against an estimate
+  (HLS rates are borrowed from the matching https stream: HLS states only a peak).
+- yt-dlp starts ffmpeg and Deno: it runs in its own process group
+  (`process::command_tree`) so Stop ends all of them.
+- Check with `python3 scripts/dev/link_check.py` (real UI, CC-BY Big Buck Bunny on
+  YouTube and Wikimedia Commons).
+
 ### Captions, projects, export
 
 - `captions/srt.rs` writes SRT for CapCut: UTF-8 without BOM, CRLF line endings.

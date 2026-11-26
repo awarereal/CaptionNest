@@ -27,6 +27,10 @@ pub struct Paths {
     pub previews: PathBuf,
     /// Caption fonts the user added.
     pub fonts: PathBuf,
+    /// yt-dlp and Deno for "Paste a video link" (downloaded on first use, kept current).
+    pub link_tools: PathBuf,
+    /// Saved link readings and yt-dlp's / Deno's caches.
+    pub link_cache: PathBuf,
 }
 
 impl Paths {
@@ -68,8 +72,10 @@ impl Paths {
             jobs: cache.join("jobs"),
             previews: cache.join("previews"),
             fonts: data.join("fonts"),
+            link_tools: data.join("link-tools"),
+            link_cache: cache.join("links"),
         };
-        for dir in [&paths.models, &paths.config, &paths.jobs, &paths.previews, &paths.fonts] {
+        for dir in [&paths.models, &paths.config, &paths.jobs, &paths.previews, &paths.fonts, &paths.link_cache] {
             std::fs::create_dir_all(dir).map_err(|e| AppError::internal(format!("create {}: {e}", dir.display())))?;
         }
         Ok(paths)

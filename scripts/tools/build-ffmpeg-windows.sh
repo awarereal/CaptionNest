@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Build a minimal, LGPL-only, statically linked ffmpeg.exe + ffprobe.exe for Windows x64.
+# Network protocols use Windows' own TLS (Schannel), for "Paste a video link" (yt-dlp
+# hands ffmpeg the stream address so only the chosen part is fetched).
 # Run inside an MSYS2 MINGW64 shell with: mingw-w64-x86_64-gcc make nasm pkgconf
 # mingw-w64-x86_64-zlib diffutils (CI installs these with msys2/setup-msys2).
 #
@@ -25,7 +27,7 @@ CONFIGURE_ARGS=(
   --disable-gpl --disable-nonfree
   --disable-autodetect
   --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-zlib
-  --disable-network
+  --enable-network --enable-schannel
   --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages
   --disable-ffplay
   --disable-debug

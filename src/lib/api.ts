@@ -23,6 +23,9 @@ import type {
   ValidationReport,
   VoiceLiveEvent,
   VoiceStatus,
+  LinkInfo,
+  LinkRequest,
+  LinkToolsState,
 } from "./types";
 
 /** Normalizes anything thrown by `invoke` into an AppError. */
@@ -114,6 +117,20 @@ export const api = {
   saveOnlineKey: (key: string) => call<Settings>("save_online_key", { key }),
   removeOnlineKey: () => call<Settings>("remove_online_key"),
   startSync: (request: SyncRequest) => call<string>("start_sync", { request }),
+
+  linkToolsState: () => call<LinkToolsState>("link_tools_state"),
+  /** Reads a video link (title, length, preview frames, quality choices). */
+  probeLink: (url: string) => call<LinkInfo>("probe_link", { url }),
+  cancelLinkProbe: () => call<void>("cancel_link_probe"),
+  /** A thumbnail or preview-frame sheet as bytes (the page can't reach the internet). */
+  linkImage: async (url: string): Promise<ArrayBuffer> => {
+    try {
+      return await invoke<ArrayBuffer>("link_image", { url });
+    } catch (e) {
+      throw toAppError(e);
+    }
+  },
+  startLink: (request: LinkRequest) => call<string>("start_link", { request }),
 
   burnBegin: () => call<string>("burn_begin"),
   /** Sends one caption image as raw bytes (no JSON encoding of large arrays). */

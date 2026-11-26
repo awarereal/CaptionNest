@@ -22,6 +22,8 @@ pub enum JobKind {
     Burn,
     /// Auto-sync: finding where existing captions are spoken.
     Sync,
+    /// Getting a video (or part of one) from a link.
+    Link,
 }
 
 #[derive(Default)]

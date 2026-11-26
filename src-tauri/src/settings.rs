@@ -29,6 +29,9 @@ pub struct Settings {
     /// Interface theme (Settings > Appearance): "system", "tungsten", "daylight",
     /// "midnight" or "contrast".
     pub theme: String,
+    /// Where videos from links are saved (None: Movies/Videos › CaptionNest).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip_folder: Option<String>,
 }
 
 impl Settings {
@@ -53,6 +56,7 @@ impl Default for Settings {
             online_engine: "both".into(),
             sarvam_api_key: None,
             theme: "tungsten".into(),
+            clip_folder: None,
         }
     }
 }

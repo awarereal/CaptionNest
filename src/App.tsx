@@ -20,6 +20,7 @@ import { WorkspaceScreen } from "./screens/WorkspaceScreen";
 import { SettingsPanel } from "./panels/SettingsPanel";
 import { HelpPanel } from "./panels/HelpPanel";
 import { AboutPanel } from "./panels/AboutPanel";
+import { LinkDialog } from "./panels/LinkDialog";
 import { DropVeil } from "./components/DropVeil";
 
 export default function App() {
@@ -124,6 +125,7 @@ export default function App() {
       <SettingsPanel />
       <HelpPanel />
       <AboutPanel />
+      <LinkDialog />
       <ConfirmHost />
       <Toaster position="bottom-right" toastOptions={{ unstyled: true, className: "toast" }} />
     </Tooltip.Provider>

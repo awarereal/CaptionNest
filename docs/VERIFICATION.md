@@ -197,6 +197,30 @@ can't be synced (their words aren't the spoken words); captions over loud music 
 overlapping voices are marked for review, not moved by guesswork; a 4.4-minute file
 takes about 30-40 s on an M3 Pro.
 
+## Video links (November 2026)
+
+yt-dlp 2026.11.23 with Deno 2.9.8 and the bundled FFmpeg 9.0.2 (network protocols with
+the OS's TLS), on an M3 Pro, home connection. Test videos: Blender's Big Buck Bunny
+(CC-BY) on YouTube (aqz-KE-bpKQ, 10:35, up to 4K60) and on Wikimedia Commons.
+
+| Measure | Result |
+|---|---|
+| First-time setup (yt-dlp onedir 54 MB + Deno 39 MB) | 92.9 MB, checksums verified, warm start included |
+| Reading a YouTube link | ~15 s first time, 3.5–4 s after (yt-dlp and Deno caches) |
+| yt-dlp start, single-file vs onedir build | 12 s every run vs 0.3 s (after the first) |
+| 2-min 1080p60 part (6:40–8:40), YouTube HLS vs https | **10 s** (49 MB) vs 63 s (53 MB) |
+| 60 s part (1:30–2:30), "For editing" | H.264 1080p60 + AAC, 60.02 s long, opened for captions |
+| Size estimate, 1 min "For editing" / "Sound only" | 25–27 MB (actual 19.6 MB) / 971 KB |
+
+`scripts/dev/link_check.py` in the real app: link read with its `t=90` start, preview
+frames, Stop (yt-dlp and ffmpeg gone, no half-file left), closing the dialog during a
+download (notice, then the part opens: 30.02 s for a 30 s part), plain errors for a
+missing video, a non-video page and text that isn't a link, and a 20 s part from
+Wikimedia Commons (its DASH manifest skipped). All 21 checks pass.
+
+Not checked: Windows and Intel Macs (CI builds them; the first real run there is
+pending), sites other than YouTube and Commons, videos that need a sign-in.
+
 ## Long video
 
 30.2-minute video of 126 real Bangla utterances with 0.5–3 s pauses, run through the real

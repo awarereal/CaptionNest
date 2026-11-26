@@ -4,7 +4,10 @@
 #   scripts/tools/build-ffmpeg-macos.sh arm64|x86_64
 #
 # - No GPL or nonfree components, no external libraries except system frameworks
-#   (VideoToolbox, AudioToolbox, zlib), so the only source to offer is FFmpeg itself.
+#   (VideoToolbox, AudioToolbox, Security, zlib), so the only source to offer is FFmpeg itself.
+# - Network protocols use macOS's own TLS (Secure Transport): "Paste a video link" has
+#   yt-dlp hand ffmpeg the stream address so only the chosen part is fetched. Nothing
+#   else in CaptionNest gives ffmpeg a network address.
 # - Output: build/tools/<target-triple>/{ffmpeg,ffprobe} plus FFMPEG_CONFIGURE.txt
 set -euo pipefail
 
@@ -46,7 +49,7 @@ CONFIGURE_ARGS=(
   --disable-gpl --disable-nonfree
   --disable-autodetect
   --enable-videotoolbox --enable-audiotoolbox --enable-zlib
-  --disable-network
+  --enable-network --enable-securetransport
   --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages
   --disable-ffplay
   --disable-debug

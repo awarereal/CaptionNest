@@ -362,6 +362,10 @@ export const useStore = create<Store>((set, get) => {
         void import("./sync").then((m) => m.useSync.getState().onProgress(e));
         return;
       }
+      if (e.kind === "link") {
+        void import("./link").then((m) => m.useLink.getState().onProgress(e));
+        return;
+      }
       if (e.kind === "preview") {
         const p = get().preview;
         if (p.status === "converting" && (!p.jobId || p.jobId === e.jobId)) {
@@ -383,6 +387,10 @@ export const useStore = create<Store>((set, get) => {
       }
       if (e.kind === "sync") {
         void import("./sync").then((m) => m.useSync.getState().onFinished(e));
+        return;
+      }
+      if (e.kind === "link") {
+        void import("./link").then((m) => m.useLink.getState().onFinished(e));
         return;
       }
       if (e.kind === "preview") {

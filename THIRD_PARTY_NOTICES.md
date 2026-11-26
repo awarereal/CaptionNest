@@ -17,7 +17,9 @@ FFmpeg 9.0.2 (ffmpeg, ffprobe)
   https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz,
   SHA-256 8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e).
   FFmpeg is built without GPL or non-free parts and without external codec
-  libraries. The exact configure options are in licenses/FFMPEG_BUILD.txt and
+  libraries; its network access (used only by "Paste a video link") goes
+  through the operating system's own TLS (Secure Transport on macOS, Schannel
+  on Windows). The exact configure options are in licenses/FFMPEG_BUILD.txt and
   the build scripts are in the CaptionNest source repository
   (scripts/tools/). FFmpeg runs as a separate program; CaptionNest does not
   link to it. FFmpeg is a trademark of Fabrice Bellard, originator of the
@@ -93,6 +95,20 @@ Downloaded on request (not included in the installer)
 
 These files are downloaded only when you choose to, directly from their
 publishers, and are checked against a pinned SHA-256 fingerprint.
+
+For "Paste a video link" (downloaded the first time it's used, kept up to date,
+each file checked against the SHA-256 published with its release):
+
+yt-dlp (https://github.com/yt-dlp/yt-dlp)
+  License: The Unlicense (public domain). Its official ready-to-run builds,
+  which CaptionNest downloads from the yt-dlp releases page, also contain
+  Python and other components under their own licenses, some GPLv3+; see
+  THIRD_PARTY_LICENSES.txt inside the downloaded folder. yt-dlp runs as a
+  separate program; CaptionNest neither includes nor links to it.
+
+Deno (https://github.com/denoland/deno)
+  License: MIT — Copyright (c) 2018-2026 the Deno authors. yt-dlp runs
+  YouTube's player code in it. Runs as a separate program.
 
 OpenAI Whisper models (ggml format)
   License: MIT — Copyright (c) 2022 OpenAI

@@ -954,3 +954,53 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* "Or paste a video link" on the home screen */
+.linkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(460px, 100%);
+  margin: 18px auto 0;
+  padding: 4px 4px 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--slate-2) 70%, transparent);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.linkbar:hover {
+  border-color: var(--line-strong);
+}
+
+.linkbar:focus-within {
+  border-color: var(--teal);
+  background: var(--slate-2);
+}
+
+.linkbar__icon {
+  flex: none;
+  color: var(--dust);
+}
+
+.linkbar__input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--paper);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.linkbar__input::placeholder {
+  color: var(--dust);
+}
+
+.linkbar .btn {
+  border-radius: 999px;
+}

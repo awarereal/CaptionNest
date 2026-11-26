@@ -43,6 +43,8 @@ pub enum ErrorCode {
     VoiceFailed,
     /// A file added as a caption font isn't a usable font.
     FontInvalid,
+    /// A video link couldn't be read or fetched (the message says why in plain words).
+    LinkFailed,
 }
 
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

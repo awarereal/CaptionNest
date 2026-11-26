@@ -123,7 +123,8 @@ export type ErrorCode =
   | "voice_key"
   | "voice_credits"
   | "voice_failed"
-  | "font_invalid";
+  | "font_invalid"
+  | "link_failed";
 
 export interface AppError {
   code: ErrorCode;
@@ -175,7 +176,7 @@ export interface DownloadEvent {
   error?: AppError;
 }
 
-export type JobKind = "generate" | "preview" | "burn" | "sync";
+export type JobKind = "generate" | "preview" | "burn" | "sync" | "link";
 
 /** Auto-sync: one caption's new and old times. */
 export interface SyncedCue {
@@ -206,7 +207,7 @@ export interface SyncResult {
   summary: SyncSummary;
   modelUsed: string | null;
 }
-export type Stage = "preparing" | "extracting" | "transcribing" | "translating" | "finishing" | "converting" | "rendering";
+export type Stage = "preparing" | "extracting" | "transcribing" | "translating" | "finishing" | "converting" | "rendering" | "downloading";
 
 export interface ProgressEvent {
   jobId: string;
@@ -257,6 +258,8 @@ export interface Settings {
   sarvamKeyHint?: string | null;
   /** Interface theme id (lib/theme.ts). */
   theme: string;
+  /** Where videos from links are saved (null: Movies/Videos › CaptionNest). */
+  clipFolder?: string | null;
 }
 
 export interface RecentProject {
@@ -346,4 +349,67 @@ export interface VoiceLiveEvent {
   text: string;
   isFinal: boolean;
   error: AppError | null;
+}
+
+// ---------- video links ----------
+
+export interface LinkToolsState {
+  installed: boolean;
+  /** yt-dlp's version, e.g. "2026.11.23". */
+  version: string | null;
+  /** About how much the first download is. */
+  downloadBytes: number;
+  defaultFolder: string;
+}
+
+export type LinkQuality = "editing" | "best" | "audio";
+
+export interface QualityChoice {
+  quality: LinkQuality;
+  available: boolean;
+  height: number | null;
+  ext: string | null;
+  /** Video codec family: "avc1" is H.264 (opens in every editor), "vp09", "av01"… */
+  vcodec: string | null;
+  wholeBytes: number | null;
+  partBytesPerSec: number | null;
+}
+
+/** YouTube's preview frames: sprite sheets of `columns` × `rows` frames. */
+export interface Storyboard {
+  sheets: string[];
+  columns: number;
+  rows: number;
+  width: number;
+  height: number;
+  frameMs: number;
+}
+
+export interface LinkInfo {
+  key: string;
+  url: string;
+  title: string;
+  uploader: string | null;
+  site: string;
+  durationMs: number | null;
+  /** Where the link asked to start (YouTube's t=). */
+  startMs: number | null;
+  thumbnail: string | null;
+  storyboard: Storyboard | null;
+  choices: QualityChoice[];
+}
+
+export interface LinkRequest {
+  key: string;
+  url: string;
+  quality: LinkQuality;
+  fromMs: number | null;
+  toMs: number | null;
+  folder: string;
+  estimateBytes: number | null;
+}
+
+export interface LinkResult {
+  path: string;
+  bytes: number;
 }
