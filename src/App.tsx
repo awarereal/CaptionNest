@@ -45,7 +45,18 @@ export default function App() {
         if (useStore.getState().info?.automation) enableAutomation(useStore);
       })
       .catch((e) => setBootError(String(e?.message ?? e)))
-      .finally(() => requestAnimationFrame(() => void api.showWindow()));
+      .finally(() => {
+        // After the next paint, so the window never flashes blank. A hidden web view may
+        // not paint at all (macOS pauses animation frames for it), so a timer backs it up.
+        let shown = false;
+        const show = () => {
+          if (shown) return;
+          shown = true;
+          void api.showWindow();
+        };
+        requestAnimationFrame(show);
+        window.setTimeout(show, 150);
+      });
     // Caption fonts the user added load in the background; previews redraw when ready.
     void useUserFonts.getState().load();
     void useVoice.getState().refreshStatus();

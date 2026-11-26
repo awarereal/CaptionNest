@@ -786,6 +786,16 @@ pub fn run() {
             }
         }));
     }
+    if !is_self_test {
+        // Size and place are remembered; whether the window was hidden is not. A run that
+        // never showed it (a headless self-test, a start that failed) saved "hidden", and
+        // every later start then kept the window hidden: the app ran with no window at all.
+        builder = builder.plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE)
+                .build(),
+        );
+    }
     builder
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -795,7 +805,6 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(move |app| {
             let paths = Paths::resolve(app.handle()).inspect_err(|e| {
                 eprintln!("CaptionNest could not start: {} ({})", e.message, e.detail.as_deref().unwrap_or(""));
@@ -816,6 +825,22 @@ pub fn run() {
                 live: voice_live::Live::default(),
                 self_test: is_self_test,
             });
+            if !is_self_test {
+                // The interface shows the window once it has painted. If that never comes
+                // (a script error, a web view that doesn't paint while hidden), the window
+                // shows anyway, so the app can't be running with no window.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                    if let Some(w) = handle.get_webview_window("main") {
+                        if !w.is_visible().unwrap_or(true) {
+                            log::warn!("the interface didn't show the window in time; showing it");
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                });
+            }
             if let Some(test) = self_test.clone() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
