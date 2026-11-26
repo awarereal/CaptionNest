@@ -42,6 +42,11 @@ export function onlinePlan(settings: Settings | null, deepgramKey: boolean, spok
   return sarvam ? "sarvam" : null;
 }
 
+/** Whether Auto-sync listens with Deepgram (Rust: start_sync) for captions in this language. */
+export function syncWithDeepgram(settings: Settings | null, deepgramKey: boolean, language: string | undefined): boolean {
+  return deepgramKey && (settings?.onlineRecognition ?? true) && engineSetting(settings) !== "sarvam" && DEEPGRAM_LANGUAGES.has(language ?? "");
+}
+
 /** Who the plan sends the video's sound to, in words. */
 export function planServices(plan: OnlinePlan): string {
   return plan === "sarvam+deepgram" ? "Sarvam and Deepgram" : plan === "deepgram" ? "Deepgram" : plan === "sarvam" ? "Sarvam" : "";

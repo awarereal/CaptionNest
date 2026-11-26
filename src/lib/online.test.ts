@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onlinePlan } from "./online";
+import { onlinePlan, syncWithDeepgram } from "./online";
 import type { Settings } from "./types";
 
 const base = { onlineRecognition: true, sarvamKeyHint: null, onlineEngine: "both" } as unknown as Settings;
@@ -36,5 +36,15 @@ describe("onlinePlan", () => {
 
   it("is off when online recognition is switched off", () => {
     expect(onlinePlan({ ...withSarvam, onlineRecognition: false }, true, "bn", true)).toBeNull();
+  });
+});
+
+describe("syncWithDeepgram", () => {
+  it("listens with Deepgram when its key is saved, unless Sarvam only is chosen", () => {
+    expect(syncWithDeepgram(base, true, "bn")).toBe(true);
+    expect(syncWithDeepgram(base, false, "bn")).toBe(false);
+    expect(syncWithDeepgram({ ...base, onlineEngine: "sarvam" }, true, "bn")).toBe(false);
+    expect(syncWithDeepgram({ ...base, onlineRecognition: false }, true, "bn")).toBe(false);
+    expect(syncWithDeepgram(base, true, "ta")).toBe(false);
   });
 });

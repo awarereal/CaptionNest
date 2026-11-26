@@ -178,7 +178,21 @@ Through the real interface (`scripts/dev/sync_check.py`): whole video and sectio
 runs, preview, apply, "Check timing" marks, text and order untouched, Undo restores the
 old times; at a section's edge a synced caption never crosses an untouched one.
 
-Limits: needs an installed offline model for the captions' language; translated tracks
+With music under the speech (the phrase recording with a vlog's music 6 dB below it), and on a
+real 12-minute vlog with music (November 2026):
+
+| Auto-sync listens with | Starts within 0.15 s (music test) | 1 in 10 off by | Made worse (of 70) | Real vlog: captions moved closer / further |
+|---|---|---|---|---|
+| offline model, pause layout | 61-80% | 0.35-0.69 s+ | 4-6 | 13 / 98 (49% → 16% within 0.15 s) |
+| **Deepgram, own word times + pause snapping** | **79-83%** | **0.18-0.23 s+** | **0-1** | 22 / 25 (49% → 50%) |
+
+Pause snapping (a start within 0.25 s of a speech onset goes onto it) took Deepgram's median
+start error from 65-75 ms to 26-32 ms and changed nothing else. Requiring a caption's first
+word to be heard before moving it was tried and dropped: worse on the music test (79% → 73%).
+On the vlog, two Deepgram requests placed some words up to 1.4 s apart, so per-caption scores
+there are only a rough guide.
+
+Limits: needs an installed offline model (or a Deepgram key) for the captions' language; translated tracks
 can't be synced (their words aren't the spoken words); captions over loud music or
 overlapping voices are marked for review, not moved by guesswork; a 4.4-minute file
 takes about 30-40 s on an M3 Pro.

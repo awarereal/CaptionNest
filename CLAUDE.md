@@ -170,7 +170,9 @@ Three measured facts shape all timing code:
   (`segment::Options::keep_all_words`), with a check that no letter was lost.
 
 Auto-sync (`asr/resync.rs`, `pipeline::resync_captions`, `JobKind::Sync`) moves existing
-captions to their speech and returns new times only. It matches caption words to heard
+captions to their speech and returns new times only. With a Deepgram key (and not "Sarvam only"), Deepgram listens to the pause-to-pause stretches and
+each caption takes its words' own times (`resync` with no pause regions), then a start within
+0.25 s of a speech onset goes onto it (`snap_starts_to_onsets`). Otherwise the offline model listens: It matches caption words to heard
 words in order (fuzzy; Bengali and Latin script compared by sound), uses that only to
 learn which stretch of speech each word is in, and lays the words out by length between
 pauses. Captions it can't hear are never guessed: they are placed by the layout or their

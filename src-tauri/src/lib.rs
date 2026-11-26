@@ -304,6 +304,14 @@ async fn start_sync(app: AppHandle, state: State<'_, AppState>, request: pipelin
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
         let report = Reporter::new(handle.clone(), id.clone(), JobKind::Sync);
+        let mut request = request;
+        // Deepgram hears the words (and their times) far better under music than the
+        // offline model; "Sarvam only" in Settings means its credits aren't used.
+        let (online_on, engine) = {
+            let s = state.settings.lock().unwrap();
+            (s.online_recognition, s.online_engine.clone())
+        };
+        request.deepgram = state.voice.get().filter(|_| online_on && engine != "sarvam").map(|key| voice::Deepgram { key, http: state.http.clone() });
         let result = jobs::guard(pipeline::resync_captions(&state.paths, request, &id, &cancel, &report)).await;
         jobs::finish(&handle, &state.jobs, JobKind::Sync, &id, result);
     });
